@@ -27,7 +27,7 @@
 #include "generic-link-service.hpp"
 #include "multicast-udp-transport.hpp"
 #include "core/global-io.hpp"
-#include "core/network-interface.hpp"
+#include "core/global-network-monitor.hpp"
 
 #ifdef __linux__
 #include <cerrno>       // for errno
@@ -60,16 +60,16 @@ UdpFactory::prohibitEndpoint(const udp::Endpoint& endpoint)
 void
 UdpFactory::prohibitAllIpv4Endpoints(uint16_t port)
 {
-  for (const NetworkInterfaceInfo& nic : listNetworkInterfaces()) {
-    for (const auto& addr : nic.ipv4Addresses) {
+  for (const shared_ptr<ndn::util::NetworkInterface>& nic : getGlobalNetworkMonitor().listNetworkInterfaces()) {
+    for (const auto& addr : nic->getIpv4Addresses()) {
       if (addr != ip::address_v4::any()) {
         prohibitEndpoint(udp::Endpoint(addr, port));
       }
     }
 
-    if (nic.isBroadcastCapable() &&
-        nic.broadcastAddress != ip::address_v4::any()) {
-      prohibitEndpoint(udp::Endpoint(nic.broadcastAddress, port));
+    if (nic->isBroadcastCapable() &&
+        nic->getIpv4BroadcastAddress() != ip::address_v4::any()) {
+      prohibitEndpoint(udp::Endpoint(nic->getIpv4BroadcastAddress(), port));
     }
   }
 
@@ -79,8 +79,8 @@ UdpFactory::prohibitAllIpv4Endpoints(uint16_t port)
 void
 UdpFactory::prohibitAllIpv6Endpoints(uint16_t port)
 {
-  for (const NetworkInterfaceInfo& nic : listNetworkInterfaces()) {
-    for (const auto& addr : nic.ipv6Addresses) {
+  for (const shared_ptr<ndn::util::NetworkInterface>& nic : getGlobalNetworkMonitor().listNetworkInterfaces()) {
+    for (const auto& addr : nic->getIpv6Addresses()) {
       if (addr != ip::address_v6::any()) {
         prohibitEndpoint(udp::Endpoint(addr, port));
       }
@@ -90,6 +90,7 @@ UdpFactory::prohibitAllIpv6Endpoints(uint16_t port)
 
 shared_ptr<UdpChannel>
 UdpFactory::createChannel(const udp::Endpoint& endpoint,
+                          const shared_ptr<ndn::util::NetworkInterface>& ni,
                           const time::seconds& timeout)
 {
   NFD_LOG_DEBUG("Creating unicast channel " << endpoint);
@@ -110,7 +111,7 @@ UdpFactory::createChannel(const udp::Endpoint& endpoint,
                                 "endpoint is already allocated for a UDP multicast face"));
   }
 
-  channel = make_shared<UdpChannel>(endpoint, timeout);
+  channel = make_shared<UdpChannel>(endpoint, ni, timeout);
   m_channels[endpoint] = channel;
   prohibitEndpoint(endpoint);
 
@@ -118,12 +119,26 @@ UdpFactory::createChannel(const udp::Endpoint& endpoint,
 }
 
 shared_ptr<UdpChannel>
-UdpFactory::createChannel(const std::string& localIp, const std::string& localPort,
+UdpFactory::createChannel(const std::string& localIp,
+                          const std::string& localPort,
+                          const shared_ptr<ndn::util::NetworkInterface>& ni,
                           const time::seconds& timeout)
 {
   udp::Endpoint endpoint(ip::address::from_string(localIp),
                          boost::lexical_cast<uint16_t>(localPort));
-  return createChannel(endpoint, timeout);
+  return createChannel(endpoint, ni, timeout);
+}
+
+bool UdpFactory::deleteChannel(const udp::Endpoint& localEndpoint)
+{
+  shared_ptr<UdpChannel> channel = findChannel(localEndpoint); // TODO mio auto
+  if (channel) {
+    channel->close(channel);
+    m_channels.erase(localEndpoint);
+    m_prohibitedEndpoints.erase(localEndpoint); // TODO mio handle 0.0.0.0
+    return true;
+  }
+  return false;
 }
 
 shared_ptr<Face>
@@ -266,6 +281,46 @@ UdpFactory::createFace(const FaceUri& uri,
   }
 
   onConnectFailed("No channels available to connect to " + boost::lexical_cast<std::string>(endpoint));
+}
+
+void UdpFactory::createFace(const ndn::util::FaceUri& uri,
+                            const ndn::util::FaceUri& localUri,
+                            ndn::nfd::FacePersistency persistency,
+                            const FaceCreatedCallback& onCreated,
+                            const FaceCreationFailedCallback& onConnectFailed)
+{
+  BOOST_ASSERT(uri.isCanonical());
+
+  if (persistency == ndn::nfd::FACE_PERSISTENCY_ON_DEMAND) {
+    BOOST_THROW_EXCEPTION(Error("UdpFactory::createFace does not support FACE_PERSISTENCY_ON_DEMAND"));
+  }
+
+  udp::Endpoint endpoint(ip::address::from_string(uri.getHost()),
+                         boost::lexical_cast<uint16_t>(uri.getPort()));
+
+  if (endpoint.address().is_multicast()) {
+    onConnectFailed("The provided address is multicast. Please use createMulticastFace method");
+    return;
+  }
+
+  if (m_prohibitedEndpoints.find(endpoint) != m_prohibitedEndpoints.end()) {
+    onConnectFailed("Requested endpoint is prohibited "
+                    "(reserved by this NFD or disallowed by face management protocol)");
+    return;
+  }
+
+  NFD_LOG_DEBUG("*** Chosing channels: " << uri << "  " << persistency);
+
+  udp::Endpoint localEndpoint(ip::address::from_string(localUri.getHost()),
+                              boost::lexical_cast<uint16_t>(localUri.getPort()));
+
+  auto channel = m_channels.find(localEndpoint);
+  if (channel != m_channels.end()) {
+    channel->second->connect(endpoint, persistency, onCreated, onConnectFailed);
+    return;
+  }
+
+  onConnectFailed("No channels with the correspoding address: " + boost::lexical_cast<std::string>(localEndpoint));
 }
 
 std::vector<shared_ptr<const Channel>>

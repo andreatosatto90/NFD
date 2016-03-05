@@ -64,6 +64,25 @@ public:
              const FaceCreatedCallback& onCreated,
              const FaceCreationFailedCallback& onConnectFailed) = 0;
 
+  /** \brief Try to create Face using the supplied remote and local FaceUri
+   *
+   * This method choose the channel corresponding to the LocalUri specified.
+   *
+   * \p uri remote FaceUri
+   * \p localUri local FaceUri
+   * \throw Error Factory does not support connect operation
+   * \throw Error specified \p persistency is not supported
+   */
+  virtual void
+  createFace(const FaceUri& uri,
+             const FaceUri& localUri,
+             ndn::nfd::FacePersistency persistency,
+             const FaceCreatedCallback& onCreated,
+             const FaceCreationFailedCallback& onConnectFailed)
+  {
+    createFace(uri, persistency, onCreated, onConnectFailed);
+  } //TODO mio pure virtual
+
   virtual std::vector<shared_ptr<const Channel>>
   getChannels() const = 0;
 };

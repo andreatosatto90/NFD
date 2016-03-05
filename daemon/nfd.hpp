@@ -119,7 +119,6 @@ private:
   unique_ptr<StrategyChoiceManager>  m_strategyChoiceManager;
   unique_ptr<ForwarderStatusManager> m_forwarderStatusManager;
 
-  unique_ptr<ndn::util::NetworkMonitor> m_networkMonitor;
   scheduler::ScopedEventId              m_reloadConfigEvent;
 };
 

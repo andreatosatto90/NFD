@@ -31,11 +31,92 @@
 #include <ndn-cxx/management/nfd-face-query-filter.hpp>
 #include "face/face.hpp"
 
+#include <ndn-cxx/util/network-monitor.hpp> //TODO mio forward decl?
+#include <ndn-cxx/util/network-interface.hpp> //TODO mio forward decl?
+
+#ifdef HAVE_LIBPCAP // TODO mio classe ethernet forward?
+#include "face/ethernet-factory.hpp"
+#include "face/ethernet-transport.hpp"
+#endif // HAVE_LIBPCAP
+
 namespace nfd {
 
 class FaceTable;
-class NetworkInterfaceInfo;
 class ProtocolFactory;
+
+// ; the unix section contains settings of Unix stream faces and channels
+// unix
+// {
+//   path /var/run/nfd.sock ; Unix stream listener path
+// }
+struct UnixConfig {
+  std::string path = "/var/run/nfd.sock";
+};
+
+// ; the tcp section contains settings of TCP faces and channels
+// tcp
+// {
+//   listen yes ; set to 'no' to disable TCP listener, default 'yes'
+//   port 6363 ; TCP listener port number
+// }
+struct TcpConfig {
+  uint16_t port = 6363;
+  bool needToListen = true;
+  bool enableV4 = true;
+  bool enableV6 = true;
+};
+
+// ; the udp section contains settings of UDP faces and channels
+// udp
+// {
+//   port 6363 ; UDP unicast port number
+//   idle_timeout 600 ; idle time (seconds) before closing a UDP unicast face
+//   keep_alive_interval 25 ; interval (seconds) between keep-alive refreshes
+
+//   ; NFD creates one UDP multicast face per NIC
+//   mcast yes ; set to 'no' to disable UDP multicast, default 'yes'
+//   mcast_port 56363 ; UDP multicast port number
+//   mcast_group 224.0.23.170 ; UDP multicast group (IPv4 only)
+// }
+struct UdpConfig {
+  uint16_t port = 6262; // TODO mio 6363
+  bool enableV4 = true;
+  bool enableV6 = true;
+  size_t timeout = 600;
+  size_t keepAliveInterval = 25;
+  bool useMcast = true;
+  boost::asio::ip::address_v4 mcastGroup = boost::asio::ip::address_v4::from_string("224.0.23.170");
+  uint16_t mcastPort = 56363;
+};
+
+// ; the ether section contains settings of Ethernet faces and channels
+// ether
+// {
+//   ; NFD creates one Ethernet multicast face per NIC
+//   mcast yes ; set to 'no' to disable Ethernet multicast, default 'yes'
+//   mcast_group 01:00:5E:00:17:AA ; Ethernet multicast group
+// }
+
+struct EtherConfig {
+  bool useMcast = true;
+  ethernet::Address mcastGroup = ethernet::getDefaultMulticastAddress();
+};
+
+// ; the websocket section contains settings of WebSocket faces and channels
+// websocket
+// {
+//   listen yes ; set to 'no' to disable WebSocket listener, default 'yes'
+//   port 9696 ; WebSocket listener port number
+//   enable_v4 yes ; set to 'no' to disable listening on IPv4 socket, default 'yes'
+//   enable_v6 yes ; set to 'no' to disable listening on IPv6 socket, default 'yes'
+// }
+
+struct WebSocketConfig {
+  uint16_t port = 9696;
+  bool needToListen = true;
+  bool enableV4 = true;
+  bool enableV6 = true;
+};
 
 /**
  * @brief implement the Face Management of NFD Management Protocol.
@@ -141,14 +222,32 @@ private: // configuration
 
   void
   processSectionUdp(const ConfigSection& configSection, bool isDryRun,
-                    const std::vector<NetworkInterfaceInfo>& nicList);
+                    const std::vector<shared_ptr<ndn::util::NetworkInterface>>& nicList);
 
   void
   processSectionEther(const ConfigSection& configSection, bool isDryRun,
-                      const std::vector<NetworkInterfaceInfo>& nicList);
+                      const std::vector<shared_ptr<ndn::util::NetworkInterface>>& nicList);
 
   void
   processSectionWebSocket(const ConfigSection& configSection, bool isDryRun);
+
+  void
+  handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni);
+
+  void
+  handleInterfaceStateChanged(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                              ndn::util::NetworkInterfaceState oldState,
+                              ndn::util::NetworkInterfaceState newState);
+  void
+  handleInterfaceRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni);
+
+  void
+  handleInterfaceAddressAdded(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                              boost::asio::ip::address address);
+
+  void
+  handleInterfaceAddressRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                                boost::asio::ip::address address);
 
 PUBLIC_WITH_TESTS_ELSE_PRIVATE:
   std::map<std::string /*protocol*/, shared_ptr<ProtocolFactory>> m_factories;
@@ -157,6 +256,13 @@ private:
   FaceTable& m_faceTable;
   signal::ScopedConnection m_faceAddConn;
   signal::ScopedConnection m_faceRemoveConn;
+
+private:  // Config
+  UnixConfig m_unixConfig;
+  TcpConfig m_tcpConfig;
+  UdpConfig m_udpConfig;
+  EtherConfig m_etherConfig;
+  WebSocketConfig m_webSocketConfig;
 };
 
 } // namespace nfd

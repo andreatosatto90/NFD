@@ -174,6 +174,9 @@ public:
   virtual const Counters&
   getCounters() const;
 
+  virtual std::string
+  getInterfaceName() const;
+
 public: // upper interface
   /** \brief request the transport to be closed
    *
@@ -350,6 +353,12 @@ inline const Transport::Counters&
 Transport::getCounters() const
 {
   return *this;
+}
+
+inline std::string
+Transport::getInterfaceName() const
+{
+  return "";
 }
 
 inline FaceUri

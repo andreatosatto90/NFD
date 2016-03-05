@@ -25,7 +25,9 @@
 
 #include "tcp-factory.hpp"
 #include "core/logger.hpp"
-#include "core/network-interface.hpp"
+#include "core/global-network-monitor.hpp"
+
+#include <ndn-cxx/util/network-interface.hpp>
 
 namespace nfd {
 
@@ -52,8 +54,8 @@ TcpFactory::prohibitEndpoint(const tcp::Endpoint& endpoint)
 void
 TcpFactory::prohibitAllIpv4Endpoints(uint16_t port)
 {
-  for (const NetworkInterfaceInfo& nic : listNetworkInterfaces()) {
-    for (const auto& addr : nic.ipv4Addresses) {
+  for (const shared_ptr<ndn::util::NetworkInterface>& nic : getGlobalNetworkMonitor().listNetworkInterfaces()) {
+    for (const auto& addr : nic->getIpv4Addresses()) {
       if (addr != ip::address_v4::any()) {
         prohibitEndpoint(tcp::Endpoint(addr, port));
       }
@@ -64,8 +66,8 @@ TcpFactory::prohibitAllIpv4Endpoints(uint16_t port)
 void
 TcpFactory::prohibitAllIpv6Endpoints(uint16_t port)
 {
-  for (const NetworkInterfaceInfo& nic : listNetworkInterfaces()) {
-    for (const auto& addr : nic.ipv6Addresses) {
+  for (const shared_ptr<ndn::util::NetworkInterface>& nic : getGlobalNetworkMonitor().listNetworkInterfaces()) {
+    for (const auto& addr : nic->getIpv6Addresses()) {
       if (addr != ip::address_v6::any()) {
         prohibitEndpoint(tcp::Endpoint(addr, port));
       }

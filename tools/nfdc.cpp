@@ -290,7 +290,7 @@ Nfdc::dispatch(const std::string& command)
     ribUnregisterPrefix();
   }
   else if (command == "create") {
-    if (m_nOptions != 1)
+    if (m_nOptions < 1 && m_nOptions > 2)
       return false;
     faceCreate();
   }
@@ -435,18 +435,40 @@ Nfdc::faceCreate()
     BOOST_THROW_EXCEPTION(Error("invalid uri format"));
 
   ndn::util::FaceUri faceUri;
-  faceUri.parse(m_commandLineArguments[0]);
+  faceUri.parse(m_commandLineArguments[0]); 
 
-  faceUri.canonize(bind(&Nfdc::startFaceCreate, this, _1),
-                   bind(&Nfdc::onCanonizeFailure, this, _1),
-                   m_ioService, ndn::time::seconds(4));
+  if (m_nOptions == 1) {
+    ndn::util::FaceUri empty; //TODO mio better
+
+    faceUri.canonize(bind(&Nfdc::startFaceCreate, this, _1, empty),
+                     bind(&Nfdc::onCanonizeFailure, this, _1),
+                     m_ioService, ndn::time::seconds(4));
+  }
+  else {
+    ndn::util::FaceUri faceLocalUri;
+    faceLocalUri.parse(m_commandLineArguments[1]);
+
+    if (!boost::regex_match(m_commandLineArguments[1], e))
+      BOOST_THROW_EXCEPTION(Error("invalid local uri format"));
+
+    // TODO mio devono avere lo stesso schema
+
+    faceUri.canonize([this, faceLocalUri] (const ndn::util::FaceUri& canonicalUri) { // TODO mio deallocation?
+                      faceLocalUri.canonize(bind(&Nfdc::startFaceCreate, this, canonicalUri, _1),
+                                            bind(&Nfdc::onCanonizeFailure, this, _1),
+                                            m_ioService, ndn::time::seconds(4));},
+                      bind(&Nfdc::onCanonizeFailure, this, _1),
+                      m_ioService, ndn::time::seconds(4));
+  }
 }
 
 void
-Nfdc::startFaceCreate(const ndn::util::FaceUri& canonicalUri)
+Nfdc::startFaceCreate(const ndn::util::FaceUri& canonicalUri, const ndn::util::FaceUri& canonicalLocalUri)
 {
   ControlParameters parameters;
   parameters.setUri(canonicalUri.toString());
+  if (canonicalLocalUri != ndn::util::FaceUri())
+    parameters.setLocalUri(canonicalLocalUri.toString());
   parameters.setFacePersistency(m_facePersistency);
 
   m_controller.start<FaceCreateCommand>(parameters,

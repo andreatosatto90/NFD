@@ -138,6 +138,9 @@ main(int, char**)
         conf.env['INCLUDES_CUSTOM_LOGGER'] = [conf.options.with_custom_logger]
         conf.env['HAVE_CUSTOM_LOGGER'] = 1
 
+    conf.check_cfg(package='lttng-ust', args='--cflags --libs',
+                   uselib_store="LTTNG-UST", mandatory=True)
+
     conf.load('coverage')
 
     conf.define('DEFAULT_CONFIG_FILE', '%s/ndn/nfd.conf' % conf.env['SYSCONFDIR'])
@@ -172,7 +175,7 @@ def build(bld):
         features='cxx pch',
         source=bld.path.ant_glob(['core/**/*.cpp'],
                                  excl=['core/logger*.cpp']),
-        use='version BOOST NDN_CXX LIBRT',
+        use='version BOOST NDN_CXX LIBRT LTTNG-UST',
         includes='. core',
         export_includes='. core',
         headers='common.hpp',

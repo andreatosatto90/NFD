@@ -28,6 +28,8 @@
 #include "unicast-udp-transport.hpp"
 #include "core/global-io.hpp"
 
+#include "exception"
+
 namespace nfd {
 
 NFD_LOG_INIT("UdpChannel");
@@ -35,10 +37,12 @@ NFD_LOG_INIT("UdpChannel");
 using namespace boost::asio;
 
 UdpChannel::UdpChannel(const udp::Endpoint& localEndpoint,
+                       const shared_ptr<ndn::util::NetworkInterface>& ni,
                        const time::seconds& timeout)
   : m_localEndpoint(localEndpoint)
   , m_socket(getGlobalIoService())
   , m_idleFaceTimeout(timeout)
+  , m_networkInterface(ni)
 {
   setUri(FaceUri(m_localEndpoint));
 }
@@ -85,8 +89,30 @@ UdpChannel::listen(const FaceCreatedCallback& onFaceCreated,
   if (m_localEndpoint.address().is_v6())
     m_socket.set_option(ip::v6_only(true));
 
-  m_socket.bind(m_localEndpoint);
-  this->waitForNewPeer(onFaceCreated, onReceiveFailed);
+  try {
+    m_socket.bind(m_localEndpoint);
+    this->waitForNewPeer(onFaceCreated, onReceiveFailed);
+  }
+  catch (const std::exception& e) {
+    NFD_LOG_WARN(e.what());
+  }
+
+}
+
+void
+UdpChannel::close(shared_ptr<UdpChannel> self) // TODO mio const &
+{
+  //m_socket.close();
+
+
+  for (const auto& channelFace : m_channelFaces) {
+    if (channelFace.second->getPersistency() != ndn::nfd::FACE_PERSISTENCY_PERSISTENT) {
+      NFD_LOG_TRACE("Request close face: " << channelFace.second->getId());
+      channelFace.second->close();
+    }
+  }
+  // TODO mio poco elegante
+  getGlobalIoService().post([self] {});
 }
 
 void
@@ -108,6 +134,8 @@ UdpChannel::handleNewPeer(const boost::system::error_code& error,
                           const FaceCreationFailedCallback& onReceiveFailed)
 {
   if (error) {
+    NFD_LOG_DEBUG("Channel closed " << error.message());
+
     if (error == boost::asio::error::operation_aborted) // when the socket is closed by someone
       return;
 
@@ -117,7 +145,7 @@ UdpChannel::handleNewPeer(const boost::system::error_code& error,
     return;
   }
 
-  NFD_LOG_DEBUG("[" << m_localEndpoint << "] New peer " << m_remoteEndpoint);
+  NFD_LOG_DEBUG("[" << m_localEndpoint << "] New peer2 " << m_remoteEndpoint);
 
   bool isCreated = false;
   shared_ptr<Face> face;
@@ -144,10 +172,12 @@ UdpChannel::handleNewPeer(const boost::system::error_code& error,
 std::pair<bool, shared_ptr<Face>>
 UdpChannel::createFace(const udp::Endpoint& remoteEndpoint, ndn::nfd::FacePersistency persistency)
 {
+  NFD_LOG_TRACE("Create face");
   auto it = m_channelFaces.find(remoteEndpoint);
   if (it != m_channelFaces.end()) {
     // we already have a face for this endpoint, just reuse it
-    auto face = it->second;
+    shared_ptr<Face> face = it->second;
+    NFD_LOG_TRACE("Host: " << face->getLocalUri().getHost());
     // only on-demand -> persistent -> permanent transition is allowed
     bool isTransitionAllowed = persistency != face->getPersistency() &&
                                (face->getPersistency() == ndn::nfd::FACE_PERSISTENCY_ON_DEMAND ||
@@ -155,6 +185,7 @@ UdpChannel::createFace(const udp::Endpoint& remoteEndpoint, ndn::nfd::FacePersis
     if (isTransitionAllowed) {
       face->setPersistency(persistency);
     }
+    NFD_LOG_TRACE("**Local end point2 " << m_localEndpoint);
     return {false, face};
   }
 
@@ -163,11 +194,17 @@ UdpChannel::createFace(const udp::Endpoint& remoteEndpoint, ndn::nfd::FacePersis
   socket.set_option(ip::udp::socket::reuse_address(true));
   socket.bind(m_localEndpoint);
   socket.connect(remoteEndpoint);
-
+  NFD_LOG_TRACE("**Local end point " << m_localEndpoint << " real " << socket.local_endpoint());
+  //TODO mio cambiamenti a caso, fare diff
   auto linkService = make_unique<face::GenericLinkService>();
-  auto transport = make_unique<face::UnicastUdpTransport>(std::move(socket), persistency, m_idleFaceTimeout);
+  //TODO mio auto
+  unique_ptr<face::UnicastUdpTransport> transport =
+      make_unique<face::UnicastUdpTransport>(std::move(socket), persistency,
+                                             m_idleFaceTimeout, m_networkInterface);
   auto face = make_shared<Face>(std::move(linkService), std::move(transport));
 
+
+  //
   face->setPersistency(persistency);
 
   m_channelFaces[remoteEndpoint] = face;

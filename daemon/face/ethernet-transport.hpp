@@ -28,7 +28,8 @@
 
 #include "common.hpp"
 #include "transport.hpp"
-#include "core/network-interface.hpp"
+
+#include <ndn-cxx/util/network-interface.hpp>
 
 #ifndef HAVE_LIBPCAP
 #error "Cannot include this file when libpcap is not available"
@@ -40,6 +41,9 @@ typedef pcap pcap_t;
 struct pcap_pkthdr;
 
 namespace nfd {
+
+namespace ethernet = ndn::util::ethernet;
+
 namespace face {
 
 /**
@@ -61,7 +65,7 @@ public:
   /**
    * @brief Creates an Ethernet-based transport for multicast communication
    */
-  EthernetTransport(const NetworkInterfaceInfo& interface,
+  EthernetTransport(const shared_ptr<ndn::util::NetworkInterface>& interface,
                     const ethernet::Address& mcastAddress);
 
 protected:
@@ -136,8 +140,8 @@ private:
   unique_ptr<pcap_t, void(*)(pcap_t*)> m_pcap;
   boost::asio::posix::stream_descriptor m_socket;
 
-  ethernet::Address m_srcAddress;
-  ethernet::Address m_destAddress;
+  ndn::util::ethernet::Address m_srcAddress;
+  ndn::util::ethernet::Address m_destAddress;
   std::string m_interfaceName;
 #if defined(__linux__)
   int m_interfaceIndex;

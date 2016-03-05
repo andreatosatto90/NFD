@@ -29,7 +29,11 @@
 #include "protocol-factory.hpp"
 #include "core/network-interface.hpp"
 
+#include <ndn-cxx/util/network-interface.hpp>
+
 namespace nfd {
+
+namespace ethernet = ndn::util::ethernet;
 
 class EthernetFactory : public ProtocolFactory
 {
@@ -66,8 +70,8 @@ public:
    * \throws EthernetFactory::Error or EthernetTransport::Error
    */
   shared_ptr<Face>
-  createMulticastFace(const NetworkInterfaceInfo& interface,
-                      const ethernet::Address& address);
+  createMulticastFace(const shared_ptr<ndn::util::NetworkInterface>& interface,
+                      const ndn::util::ethernet::Address& address);
 
   /**
    * \brief Get map of configured multicast faces

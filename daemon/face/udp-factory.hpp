@@ -29,6 +29,8 @@
 #include "protocol-factory.hpp"
 #include "udp-channel.hpp"
 
+#include <ndn-cxx/util/network-interface.hpp>
+
 namespace nfd {
 
 /// @todo IPv6 multicast support not implemented
@@ -76,7 +78,7 @@ public:
    *      for details on ways to create udp::Endpoint
    */
   shared_ptr<UdpChannel>
-  createChannel(const udp::Endpoint& localEndpoint,
+  createChannel(const udp::Endpoint& localEndpoint, const shared_ptr<ndn::util::NetworkInterface>& ni,
                 const time::seconds& timeout = time::seconds(600));
 
   /**
@@ -95,7 +97,11 @@ public:
    */
   shared_ptr<UdpChannel>
   createChannel(const std::string& localIp, const std::string& localPort,
+                const shared_ptr<ndn::util::NetworkInterface>& ni,
                 const time::seconds& timeout = time::seconds(600));
+
+  bool
+  deleteChannel(const udp::Endpoint& localEndpoint);
 
   /**
    * \brief Create MulticastUdpFace using udp::Endpoint
@@ -148,6 +154,13 @@ public:
 public: // from ProtocolFactory
   virtual void
   createFace(const FaceUri& uri,
+             ndn::nfd::FacePersistency persistency,
+             const FaceCreatedCallback& onCreated,
+             const FaceCreationFailedCallback& onConnectFailed) DECL_OVERRIDE;
+
+  virtual void
+  createFace(const FaceUri& uri,
+             const FaceUri& localUri,
              ndn::nfd::FacePersistency persistency,
              const FaceCreatedCallback& onCreated,
              const FaceCreationFailedCallback& onConnectFailed) DECL_OVERRIDE;

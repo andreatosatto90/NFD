@@ -41,9 +41,11 @@ NFD_LOG_INCLASS_TEMPLATE_SPECIALIZATION_DEFINE(DatagramTransport, UnicastUdpTran
 
 UnicastUdpTransport::UnicastUdpTransport(protocol::socket&& socket,
                                          ndn::nfd::FacePersistency persistency,
-                                         time::nanoseconds idleTimeout)
+                                         time::nanoseconds idleTimeout,
+                                         const shared_ptr<ndn::util::NetworkInterface>& ni)
   : DatagramTransport(std::move(socket))
   , m_idleTimeout(idleTimeout)
+  , m_networkInterface(ni)
 {
   this->setLocalUri(FaceUri(m_socket.local_endpoint()));
   this->setRemoteUri(FaceUri(m_socket.remote_endpoint()));
@@ -78,6 +80,9 @@ UnicastUdpTransport::UnicastUdpTransport(protocol::socket&& socket,
       m_idleTimeout > time::nanoseconds::zero()) {
     scheduleClosureWhenIdle();
   }
+
+  m_networkInterface->onStateChanged.connect(bind(&UnicastUdpTransport::changeStateFromInterface,
+                                             this, _2));
 }
 
 void
@@ -90,6 +95,23 @@ UnicastUdpTransport::beforeChangePersistency(ndn::nfd::FacePersistency newPersis
   else {
     m_closeIfIdleEvent.cancel();
     setExpirationTime(time::steady_clock::TimePoint::max());
+  }
+}
+
+void
+UnicastUdpTransport::changeStateFromInterface(ndn::util::NetworkInterfaceState state)
+{
+  if (getState() != TransportState::CLOSING && getState() != TransportState::CLOSED) {
+    switch (state) {
+      case ndn::util::NetworkInterfaceState::RUNNING:
+        NFD_LOG_FACE_DEBUG("Changing state UP");
+        setState(TransportState::UP);
+        break;
+      default:
+        NFD_LOG_FACE_DEBUG("Changing state DOWN");
+        setState(TransportState::DOWN);
+        break;
+    }
   }
 }
 

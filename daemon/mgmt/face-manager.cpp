@@ -25,15 +25,17 @@
 
 #include "face-manager.hpp"
 
-#include "core/network-interface.hpp"
 #include "face/generic-link-service.hpp"
 #include "face/tcp-factory.hpp"
 #include "face/udp-factory.hpp"
 #include "fw/face-table.hpp"
+#include "core/global-network-monitor.hpp"
 
 #include <ndn-cxx/management/nfd-channel-status.hpp>
 #include <ndn-cxx/management/nfd-face-status.hpp>
 #include <ndn-cxx/management/nfd-face-event-notification.hpp>
+#include <ndn-cxx/util/network-monitor.hpp>
+#include <ndn-cxx/util/network-interface.hpp>
 
 #ifdef HAVE_UNIX_SOCKETS
 #include "face/unix-stream-factory.hpp"
@@ -79,6 +81,9 @@ FaceManager::FaceManager(FaceTable& faceTable,
     m_faceTable.afterAdd.connect(bind(&FaceManager::afterFaceAdded, this, _1, postNotification));
   m_faceRemoveConn =
     m_faceTable.beforeRemove.connect(bind(&FaceManager::afterFaceRemoved, this, _1, postNotification));
+
+  getGlobalNetworkMonitor().onInterfaceAdded.connect(bind(&FaceManager::handleInterfaceAdded, this, _1));
+  getGlobalNetworkMonitor().onInterfaceRemoved.connect(bind(&FaceManager::handleInterfaceRemoved, this, _1));
 }
 
 void
@@ -108,13 +113,47 @@ FaceManager::createFace(const Name& topPrefix, const Interest& interest,
     return done(ControlResponse(501, "Unsupported protocol"));
   }
 
+  FaceUri localUri;
+  if (parameters.hasLocalUri()) {
+    if (!localUri.parse(parameters.getLocalUri())) {
+      NFD_LOG_TRACE("failed to parse Local URI");
+      return done(ControlResponse(400, "Malformed command"));
+    }
+
+    if (!localUri.isCanonical()) {
+      NFD_LOG_TRACE("received non-canonical Local URI");
+      return done(ControlResponse(400, "Non-canonical Local URI"));
+    }
+
+    if (localUri.getScheme() != uri.getScheme()) {
+      NFD_LOG_TRACE("received two URI with different schemes");
+      return done(ControlResponse(400, "Different URI schemes"));
+    }
+
+    auto localFactory = m_factories.find(localUri.getScheme());
+    if (localFactory == m_factories.end()) {
+      return done(ControlResponse(501, "Unsupported protocol"));
+    }
+  }
+
   try {
-    factory->second->createFace(uri,
-                                parameters.getFacePersistency(),
-                                bind(&FaceManager::afterCreateFaceSuccess,
-                                     this, parameters, _1, done),
-                                bind(&FaceManager::afterCreateFaceFailure,
-                                     this, _1, done));
+    if (!parameters.hasLocalUri()) {
+      factory->second->createFace(uri,
+                                  parameters.getFacePersistency(),
+                                  bind(&FaceManager::afterCreateFaceSuccess,
+                                       this, parameters, _1, done),
+                                  bind(&FaceManager::afterCreateFaceFailure,
+                                       this, _1, done));
+    }
+    else {
+      factory->second->createFace(uri,
+                                  localUri,
+                                  parameters.getFacePersistency(),
+                                  bind(&FaceManager::afterCreateFaceSuccess,
+                                       this, parameters, _1, done),
+                                  bind(&FaceManager::afterCreateFaceFailure,
+                                       this, _1, done));
+    }
   }
   catch (const std::runtime_error& error) {
     std::string errorMessage = "Face creation failed: ";
@@ -412,12 +451,14 @@ FaceManager::processConfig(const ConfigSection& configSection,
                            bool isDryRun,
                            const std::string& filename)
 {
+  NFD_LOG_TRACE("Processing configuration ");
+
   bool hasSeenUnix = false;
   bool hasSeenTcp = false;
   bool hasSeenUdp = false;
   bool hasSeenEther = false;
   bool hasSeenWebSocket = false;
-  auto nicList = listNetworkInterfaces();
+  auto niList = getGlobalNetworkMonitor().listNetworkInterfaces();
 
   for (const auto& item : configSection) {
     if (item.first == "unix") {
@@ -434,7 +475,8 @@ FaceManager::processConfig(const ConfigSection& configSection,
       }
       hasSeenTcp = true;
 
-      processSectionTcp(item.second, isDryRun);
+      // TODO set dry Run, now we have the bind problem with previously used address
+      processSectionTcp(item.second, true);
     }
     else if (item.first == "udp") {
       if (hasSeenUdp) {
@@ -442,7 +484,8 @@ FaceManager::processConfig(const ConfigSection& configSection,
       }
       hasSeenUdp = true;
 
-      processSectionUdp(item.second, isDryRun, nicList);
+      // Always dry run true because UDP faces are managed with granular event from network monitor
+      processSectionUdp(item.second, true, niList);
     }
     else if (item.first == "ether") {
       if (hasSeenEther) {
@@ -450,7 +493,7 @@ FaceManager::processConfig(const ConfigSection& configSection,
       }
       hasSeenEther = true;
 
-      processSectionEther(item.second, isDryRun, nicList);
+      processSectionEther(item.second, isDryRun, niList);
     }
     else if (item.first == "websocket") {
       if (hasSeenWebSocket) {
@@ -476,11 +519,9 @@ FaceManager::processSectionUnix(const ConfigSection& configSection, bool isDryRu
   // }
 
 #if defined(HAVE_UNIX_SOCKETS)
-  std::string path = "/var/run/nfd.sock";
-
   for (const auto& i : configSection) {
     if (i.first == "path") {
-      path = i.second.get_value<std::string>();
+      m_unixConfig.path = i.second.get_value<std::string>();
     }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
@@ -496,7 +537,7 @@ FaceManager::processSectionUnix(const ConfigSection& configSection, bool isDryRu
     auto factory = make_shared<UnixStreamFactory>();
     m_factories.insert(std::make_pair("unix", factory));
 
-    auto channel = factory->createChannel(path);
+    auto channel = factory->createChannel(m_unixConfig.path);
     channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
   }
 #else
@@ -508,31 +549,19 @@ FaceManager::processSectionUnix(const ConfigSection& configSection, bool isDryRu
 void
 FaceManager::processSectionTcp(const ConfigSection& configSection, bool isDryRun)
 {
-  // ; the tcp section contains settings of TCP faces and channels
-  // tcp
-  // {
-  //   listen yes ; set to 'no' to disable TCP listener, default 'yes'
-  //   port 6363 ; TCP listener port number
-  // }
-
-  uint16_t port = 6363;
-  bool needToListen = true;
-  bool enableV4 = true;
-  bool enableV6 = true;
-
   for (const auto& i : configSection) {
     if (i.first == "port") {
-      port = ConfigFile::parseNumber<uint16_t>(i, "tcp");
-      NFD_LOG_TRACE("TCP port set to " << port);
+      m_tcpConfig.port = ConfigFile::parseNumber<uint16_t>(i, "tcp");
+      NFD_LOG_TRACE("TCP port set to " << m_tcpConfig.port);
     }
     else if (i.first == "listen") {
-      needToListen = ConfigFile::parseYesNo(i, "tcp");
+      m_tcpConfig.needToListen = ConfigFile::parseYesNo(i, "tcp");
     }
     else if (i.first == "enable_v4") {
-      enableV4 = ConfigFile::parseYesNo(i, "tcp");
+      m_tcpConfig.enableV4 = ConfigFile::parseYesNo(i, "tcp");
     }
     else if (i.first == "enable_v6") {
-      enableV6 = ConfigFile::parseYesNo(i, "tcp");
+      m_tcpConfig.enableV6 = ConfigFile::parseYesNo(i, "tcp");
     }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
@@ -540,7 +569,7 @@ FaceManager::processSectionTcp(const ConfigSection& configSection, bool isDryRun
     }
   }
 
-  if (!enableV4 && !enableV6) {
+  if (!m_tcpConfig.enableV4 && !m_tcpConfig.enableV6) {
     BOOST_THROW_EXCEPTION(ConfigFile::Error("IPv4 and IPv6 TCP channels have been disabled."
                                             " Remove \"tcp\" section to disable TCP channels or"
                                             " re-enable at least one channel type."));
@@ -554,20 +583,20 @@ FaceManager::processSectionTcp(const ConfigSection& configSection, bool isDryRun
     auto factory = make_shared<TcpFactory>();
     m_factories.insert(std::make_pair("tcp", factory));
 
-    if (enableV4) {
-      tcp::Endpoint endpoint(boost::asio::ip::tcp::v4(), port);
+    if (m_tcpConfig.enableV4) {
+      tcp::Endpoint endpoint(boost::asio::ip::tcp::v4(), m_tcpConfig.port);
       shared_ptr<TcpChannel> v4Channel = factory->createChannel(endpoint);
-      if (needToListen) {
+      if (m_tcpConfig.needToListen) {
         v4Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
       }
 
       m_factories.insert(std::make_pair("tcp4", factory));
     }
 
-    if (enableV6) {
-      tcp::Endpoint endpoint(boost::asio::ip::tcp::v6(), port);
+    if (m_tcpConfig.enableV6) {
+      tcp::Endpoint endpoint(boost::asio::ip::tcp::v6(), m_tcpConfig.port);
       shared_ptr<TcpChannel> v6Channel = factory->createChannel(endpoint);
-      if (needToListen) {
+      if (m_tcpConfig.needToListen) {
         v6Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
       }
 
@@ -578,44 +607,22 @@ FaceManager::processSectionTcp(const ConfigSection& configSection, bool isDryRun
 
 void
 FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun,
-                               const std::vector<NetworkInterfaceInfo>& nicList)
+                               const std::vector<shared_ptr<ndn::util::NetworkInterface> >& nicList)
 {
-  // ; the udp section contains settings of UDP faces and channels
-  // udp
-  // {
-  //   port 6363 ; UDP unicast port number
-  //   idle_timeout 600 ; idle time (seconds) before closing a UDP unicast face
-  //   keep_alive_interval 25 ; interval (seconds) between keep-alive refreshes
-
-  //   ; NFD creates one UDP multicast face per NIC
-  //   mcast yes ; set to 'no' to disable UDP multicast, default 'yes'
-  //   mcast_port 56363 ; UDP multicast port number
-  //   mcast_group 224.0.23.170 ; UDP multicast group (IPv4 only)
-  // }
-
-  uint16_t port = 6363;
-  bool enableV4 = true;
-  bool enableV6 = true;
-  size_t timeout = 600;
-  size_t keepAliveInterval = 25;
-  bool useMcast = true;
-  auto mcastGroup = boost::asio::ip::address_v4::from_string("224.0.23.170");
-  uint16_t mcastPort = 56363;
-
   for (const auto& i : configSection) {
     if (i.first == "port") {
-      port = ConfigFile::parseNumber<uint16_t>(i, "udp");
-      NFD_LOG_TRACE("UDP unicast port set to " << port);
+      m_udpConfig.port = ConfigFile::parseNumber<uint16_t>(i, "udp");
+      NFD_LOG_TRACE("UDP unicast port set to " << m_udpConfig.port);
     }
     else if (i.first == "enable_v4") {
-      enableV4 = ConfigFile::parseYesNo(i, "udp");
+      m_udpConfig.enableV4 = ConfigFile::parseYesNo(i, "udp");
     }
     else if (i.first == "enable_v6") {
-      enableV6 = ConfigFile::parseYesNo(i, "udp");
+      m_udpConfig.enableV6 = ConfigFile::parseYesNo(i, "udp");
     }
     else if (i.first == "idle_timeout") {
       try {
-        timeout = i.second.get_value<size_t>();
+        m_udpConfig.timeout = i.second.get_value<size_t>();
       }
       catch (const boost::property_tree::ptree_bad_data&) {
         BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
@@ -624,9 +631,9 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
     }
     else if (i.first == "keep_alive_interval") {
       try {
-        keepAliveInterval = i.second.get_value<size_t>();
+        m_udpConfig.keepAliveInterval = i.second.get_value<size_t>();
         /// \todo Make use of keepAliveInterval
-        (void)(keepAliveInterval);
+        (void)(m_udpConfig.keepAliveInterval);
       }
       catch (const boost::property_tree::ptree_bad_data&) {
         BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
@@ -634,20 +641,20 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
       }
     }
     else if (i.first == "mcast") {
-      useMcast = ConfigFile::parseYesNo(i, "udp");
+      m_udpConfig.useMcast = ConfigFile::parseYesNo(i, "udp");
     }
     else if (i.first == "mcast_port") {
-      mcastPort = ConfigFile::parseNumber<uint16_t>(i, "udp");
-      NFD_LOG_TRACE("UDP multicast port set to " << mcastPort);
+      m_udpConfig.mcastPort = ConfigFile::parseNumber<uint16_t>(i, "udp");
+      NFD_LOG_TRACE("UDP multicast port set to " << m_udpConfig.mcastPort);
     }
     else if (i.first == "mcast_group") {
       boost::system::error_code ec;
-      mcastGroup = boost::asio::ip::address_v4::from_string(i.second.get_value<std::string>(), ec);
+      m_udpConfig.mcastGroup = boost::asio::ip::address_v4::from_string(i.second.get_value<std::string>(), ec);
       if (ec) {
         BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
                                                 i.first + "\" in \"udp\" section"));
       }
-      NFD_LOG_TRACE("UDP multicast group set to " << mcastGroup);
+      NFD_LOG_TRACE("UDP multicast group set to " << m_udpConfig.mcastGroup);
     }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
@@ -655,17 +662,17 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
     }
   }
 
-  if (!enableV4 && !enableV6) {
+  if (!m_udpConfig.enableV4 && !m_udpConfig.enableV6) {
     BOOST_THROW_EXCEPTION(ConfigFile::Error("IPv4 and IPv6 UDP channels have been disabled."
                                             " Remove \"udp\" section to disable UDP channels or"
                                             " re-enable at least one channel type."));
   }
-  else if (useMcast && !enableV4) {
+  else if (m_udpConfig.useMcast && !m_udpConfig.enableV4) {
     BOOST_THROW_EXCEPTION(ConfigFile::Error("IPv4 multicast requested, but IPv4 channels"
                                             " have been disabled (conflicting configuration options set)"));
   }
 
-  if (!isDryRun) {
+  if (!isDryRun) { // TODO mio delete or restore old code
     shared_ptr<UdpFactory> factory;
     bool isReload = false;
     if (m_factories.count("udp") > 0) {
@@ -677,31 +684,48 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
       m_factories.insert(std::make_pair("udp", factory));
     }
 
-    if (!isReload && enableV4) {
-      udp::Endpoint endpoint(boost::asio::ip::udp::v4(), port);
-      shared_ptr<UdpChannel> v4Channel = factory->createChannel(endpoint, time::seconds(timeout));
-      v4Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
+    if (m_udpConfig.enableV4) {
+      for (const shared_ptr<ndn::util::NetworkInterface>& ni : nicList) {
+        if (ni->isUp() && !ni->getIpv4Addresses().empty() && !ni->isLoopback()) {
+          for (const boost::asio::ip::address_v4& address : ni->getIpv4Addresses()) {
+            shared_ptr<UdpChannel> v4Channel =
+                factory->createChannel(udp::Endpoint(address, m_udpConfig.port),
+                                       ni, time::seconds(m_udpConfig.timeout));
 
-      m_factories.insert(std::make_pair("udp4", factory));
+            v4Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
+          } // end address iteration
+        }
+      } // end network interface iteration
+
+      if (!isReload)
+        m_factories.insert(std::make_pair("udp4", factory));
     }
 
-    if (!isReload && enableV6) {
-      udp::Endpoint endpoint(boost::asio::ip::udp::v6(), port);
-      shared_ptr<UdpChannel> v6Channel = factory->createChannel(endpoint, time::seconds(timeout));
-      v6Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
+    // TODO mio abilitare dopo cambio struttura indirizzi network monitor
+    /*if (enableV6) {
+      for (const shared_ptr<ndn::util::NetworkInterface>& ni : nicList) {
+        if (ni->isUp() && !ni->getIpv6Addresses().empty() && !ni->isLoopback()) {
+          for (const boost::asio::ip::address_v6& address : ni->getIpv6Addresses()) {
+            shared_ptr<UdpChannel> v6Channel =
+                factory->createChannel(udp::Endpoint(address, port), ni, time::seconds(timeout));
+            v6Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
+          }
+        }
+      }
 
-      m_factories.insert(std::make_pair("udp6", factory));
-    }
+      if (!isReload)
+        m_factories.insert(std::make_pair("udp6", factory));
+    }*/
 
     std::set<shared_ptr<Face>> multicastFacesToRemove;
     for (const auto& i : factory->getMulticastFaces()) {
       multicastFacesToRemove.insert(i.second);
     }
 
-    if (useMcast && enableV4) {
-      std::vector<NetworkInterfaceInfo> ipv4MulticastInterfaces;
+    if (m_udpConfig.useMcast && m_udpConfig.enableV4) {
+      std::vector<shared_ptr<ndn::util::NetworkInterface>> ipv4MulticastInterfaces;
       for (const auto& nic : nicList) {
-        if (nic.isUp() && nic.isMulticastCapable() && !nic.ipv4Addresses.empty()) {
+        if (nic->isUp() && nic->isMulticastCapable() && !nic->getIpv4Addresses().empty()) {
           ipv4MulticastInterfaces.push_back(nic);
         }
       }
@@ -715,11 +739,11 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
       }
 #endif
 
-      udp::Endpoint mcastEndpoint(mcastGroup, mcastPort);
+      udp::Endpoint mcastEndpoint(m_udpConfig.mcastGroup, m_udpConfig.mcastPort);
       for (const auto& nic : ipv4MulticastInterfaces) {
-        udp::Endpoint localEndpoint(nic.ipv4Addresses[0], mcastPort);
+        udp::Endpoint localEndpoint(*(nic->getIpv4Addresses().begin()), m_udpConfig.mcastPort); // TODO mio scegliere indirizzo corretto
         auto newFace = factory->createMulticastFace(localEndpoint, mcastEndpoint,
-                                                    isNicNameNecessary ? nic.name : "");
+                                                    isNicNameNecessary ? nic->getName() : "");
         m_faceTable.add(newFace);
         multicastFacesToRemove.erase(newFace);
       }
@@ -733,7 +757,7 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
 
 void
 FaceManager::processSectionEther(const ConfigSection& configSection, bool isDryRun,
-                                 const std::vector<NetworkInterfaceInfo>& nicList)
+                                 const std::vector<shared_ptr<ndn::util::NetworkInterface> >& nicList)
 {
   // ; the ether section contains settings of Ethernet faces and channels
   // ether
@@ -744,20 +768,17 @@ FaceManager::processSectionEther(const ConfigSection& configSection, bool isDryR
   // }
 
 #if defined(HAVE_LIBPCAP)
-  bool useMcast = true;
-  ethernet::Address mcastGroup(ethernet::getDefaultMulticastAddress());
-
   for (const auto& i : configSection) {
     if (i.first == "mcast") {
-      useMcast = ConfigFile::parseYesNo(i, "ether");
+      m_etherConfig.useMcast = ConfigFile::parseYesNo(i, "ether");
     }
     else if (i.first == "mcast_group") {
-      mcastGroup = ethernet::Address::fromString(i.second.get_value<std::string>());
-      if (mcastGroup.isNull()) {
+      m_etherConfig.mcastGroup = ethernet::Address::fromString(i.second.get_value<std::string>());
+      if (m_etherConfig.mcastGroup.isNull()) {
         BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
                                                 i.first + "\" in \"ether\" section"));
       }
-      NFD_LOG_TRACE("Ethernet multicast group set to " << mcastGroup);
+      NFD_LOG_TRACE("Ethernet multicast group set to " << m_etherConfig.mcastGroup);
     }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
@@ -780,11 +801,11 @@ FaceManager::processSectionEther(const ConfigSection& configSection, bool isDryR
       multicastFacesToRemove.insert(i.second);
     }
 
-    if (useMcast) {
+    if (m_etherConfig.useMcast) {
       for (const auto& nic : nicList) {
-        if (nic.isUp() && nic.isMulticastCapable()) {
+        if (nic->isUp() && nic->isMulticastCapable()) {
           try {
-            auto newFace = factory->createMulticastFace(nic, mcastGroup);
+            auto newFace = factory->createMulticastFace(nic, m_etherConfig.mcastGroup);
             m_faceTable.add(newFace);
             multicastFacesToRemove.erase(newFace);
           }
@@ -820,24 +841,20 @@ FaceManager::processSectionWebSocket(const ConfigSection& configSection, bool is
   // }
 
 #if defined(HAVE_WEBSOCKET)
-  uint16_t port = 9696;
-  bool needToListen = true;
-  bool enableV4 = true;
-  bool enableV6 = true;
 
   for (const auto& i : configSection) {
     if (i.first == "port") {
-      port = ConfigFile::parseNumber<uint16_t>(i, "websocket");
-      NFD_LOG_TRACE("WebSocket port set to " << port);
+      m_webSocketConfig.port = ConfigFile::parseNumber<uint16_t>(i, "websocket");
+      NFD_LOG_TRACE("WebSocket port set to " << m_webSocketConfig.port);
     }
     else if (i.first == "listen") {
-      needToListen = ConfigFile::parseYesNo(i, "websocket");
+      m_webSocketConfig.needToListen = ConfigFile::parseYesNo(i, "websocket");
     }
     else if (i.first == "enable_v4") {
-      enableV4 = ConfigFile::parseYesNo(i, "websocket");
+      m_webSocketConfig.enableV4 = ConfigFile::parseYesNo(i, "websocket");
     }
     else if (i.first == "enable_v6") {
-      enableV6 = ConfigFile::parseYesNo(i, "websocket");
+      m_webSocketConfig.enableV6 = ConfigFile::parseYesNo(i, "websocket");
     }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
@@ -845,13 +862,13 @@ FaceManager::processSectionWebSocket(const ConfigSection& configSection, bool is
     }
   }
 
-  if (!enableV4 && !enableV6) {
+  if (!m_webSocketConfig.enableV4 && !m_webSocketConfig.enableV6) {
     BOOST_THROW_EXCEPTION(ConfigFile::Error("IPv4 and IPv6 WebSocket channels have been disabled."
                                             " Remove \"websocket\" section to disable WebSocket channels or"
                                             " re-enable at least one channel type."));
   }
 
-  if (!enableV4 && enableV6) {
+  if (!m_webSocketConfig.enableV4 && m_webSocketConfig.enableV6) {
     BOOST_THROW_EXCEPTION(ConfigFile::Error("NFD does not allow pure IPv6 WebSocket channel."));
   }
 
@@ -865,20 +882,20 @@ FaceManager::processSectionWebSocket(const ConfigSection& configSection, bool is
 
     shared_ptr<WebSocketChannel> channel;
 
-    if (enableV6 && enableV4) {
-      websocket::Endpoint endpoint(boost::asio::ip::address_v6::any(), port);
+    if (m_webSocketConfig.enableV6 && m_webSocketConfig.enableV4) {
+      websocket::Endpoint endpoint(boost::asio::ip::address_v6::any(), m_webSocketConfig.port);
       channel = factory->createChannel(endpoint);
 
       m_factories.insert(std::make_pair("websocket46", factory));
     }
-    else if (enableV4) {
-      websocket::Endpoint endpoint(boost::asio::ip::address_v4::any(), port);
+    else if (m_webSocketConfig.enableV4) {
+      websocket::Endpoint endpoint(boost::asio::ip::address_v4::any(), m_webSocketConfig.port);
       channel = factory->createChannel(endpoint);
 
       m_factories.insert(std::make_pair("websocket4", factory));
     }
 
-    if (channel && needToListen) {
+    if (channel && m_webSocketConfig.needToListen) {
       channel->listen(bind(&FaceTable::add, &m_faceTable, _1));
     }
   }
@@ -886,6 +903,142 @@ FaceManager::processSectionWebSocket(const ConfigSection& configSection, bool is
   BOOST_THROW_EXCEPTION(ConfigFile::Error("NFD was compiled without WebSocket, "
                                           "cannot process \"websocket\" section"));
 #endif // HAVE_WEBSOCKET
+}
+
+void
+FaceManager::handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni)
+{
+  ni->onStateChanged.connect(bind(&FaceManager::handleInterfaceStateChanged, this, ni, _1, _2));
+  ni->onAddressAdded.connect(bind(&FaceManager::handleInterfaceAddressAdded, this, ni, _1));
+  ni->onAddressRemoved.connect(bind(&FaceManager::handleInterfaceAddressRemoved, this, ni, _1));
+  NFD_LOG_TRACE("Interface added: " << ni->getName());
+
+  // No section Unix
+  // No section TCP, only addresses change are handled
+
+}
+
+void FaceManager::handleInterfaceStateChanged(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                                              ndn::util::NetworkInterfaceState oldState,
+                                              ndn::util::NetworkInterfaceState newState)
+{
+  // TODO mio check old state?
+  if (oldState == ndn::util::NetworkInterfaceState::RUNNING) {
+    // newState <= ndn::util::NetworkInterfaceState::RUNNING
+    for (auto address: ni->getIpv4Addresses())
+      handleInterfaceAddressRemoved(ni, address);
+
+    for (auto address: ni->getIpv6Addresses())
+      handleInterfaceAddressRemoved(ni, address);
+  }
+}
+
+void
+FaceManager::handleInterfaceRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni)
+{
+
+  for (auto address: ni->getIpv4Addresses())
+    handleInterfaceAddressRemoved(ni, address);
+
+  for (auto address: ni->getIpv6Addresses())
+    handleInterfaceAddressRemoved(ni, address);
+
+  /*NFD_LOG_TRACE("Interface removed: " << ni->getName());
+  if (m_factories.count("ether") > 0) {
+
+    shared_ptr<EthernetFactory> factory = static_pointer_cast<EthernetFactory>(m_factories["ether"]);
+
+    EthernetFactory::MulticastFaceMap multicastMap = factory->getMulticastFaces();
+
+    auto it = find_if(multicastMap.begin(), multicastMap.end(),
+                        [ni] (const std::pair<std::pair<std::string, ethernet::Address>,shared_ptr<Face>>& map) {
+                          return map.first.first == ni->getName(); } );
+
+    if (it == multicastMap.end()) {
+      NFD_LOG_DEBUG("No face for ethernet address: " << ni->getEthernetAddress());
+      return;
+    }
+
+    it->second->close();
+  }*/
+}
+
+void FaceManager::handleInterfaceAddressAdded(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                                              boost::asio::ip::address address)
+{
+  NFD_LOG_TRACE("Interface address added: " << address << " " << ni->getEthernetAddress());
+  // UDP section
+  shared_ptr<UdpFactory> factoryUdp;
+  bool isReload = false;
+  if (m_factories.count("udp") > 0) {
+    isReload = true;
+    factoryUdp = static_pointer_cast<UdpFactory>(m_factories["udp"]);
+  }
+  else {
+    factoryUdp = make_shared<UdpFactory>();
+    m_factories.insert(std::make_pair("udp", factoryUdp));
+  }
+
+  if (address.is_v4() && m_udpConfig.enableV4) {
+    if (ni->isUp() && !ni->isLoopback()) {
+      shared_ptr<UdpChannel> v4Channel =
+          factoryUdp->createChannel(udp::Endpoint(address, m_udpConfig.port),
+                                    ni, time::seconds(m_udpConfig.timeout));
+
+      v4Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
+    }
+
+    if (!isReload)
+      m_factories.insert(std::make_pair("udp4", factoryUdp));
+  }
+  else if (address.is_v6() && m_udpConfig.enableV6) {
+      boost::asio::ip::address_v6 addressV6 = address.to_v6();
+      if (ni->isUp() && !ni->isLoopback() && !addressV6.is_link_local()) {
+      shared_ptr<UdpChannel> v6Channel =
+          factoryUdp->createChannel(udp::Endpoint(address, m_udpConfig.port),
+                                    ni, time::seconds(m_udpConfig.timeout));
+      v6Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
+    }
+
+    if (!isReload)
+      m_factories.insert(std::make_pair("udp6", factoryUdp));
+  }
+
+  NFD_LOG_TRACE("unicast done: " << address << " " << ni->getEthernetAddress());
+
+  // create multicast face only for the interface first address notification
+  if (m_udpConfig.useMcast && m_udpConfig.enableV4 && address.is_v4() &&
+      ni->isMulticastCapable() && ni->getIpv4Addresses().size() == 1) { //TODO mio size == 1 not good
+    NFD_LOG_TRACE("Create multicast face for " << ni->getName());
+    bool isNicNameNecessary = false;
+#if defined(__linux__)
+    // TODO mio it's ok with also 0? (prima c'era un check >1)
+    // On Linux if we have more than one MulticastUdpFace
+    // we need to specify the name of the interface
+    isNicNameNecessary = true;
+#endif
+    udp::Endpoint mcastEndpoint(m_udpConfig.mcastGroup, m_udpConfig.mcastPort);
+    udp::Endpoint localEndpoint(address, m_udpConfig.mcastPort); // TODO mio scegliere indirizzo corretto
+    auto newFace = factoryUdp->createMulticastFace(localEndpoint, mcastEndpoint,
+                                                   isNicNameNecessary ? ni->getName() : "");
+    m_faceTable.add(newFace);
+
+  }
+
+  NFD_LOG_TRACE("End Interface address added: " << address << " " << ni->getEthernetAddress());
+}
+
+void FaceManager::handleInterfaceAddressRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                                                boost::asio::ip::address address)
+{
+
+  NFD_LOG_TRACE("Interface address removed: " << address << " " << ni->getEthernetAddress());
+  // UDP section
+  /*if (m_factories.count("udp") > 0) {
+    shared_ptr<UdpFactory> factoryUdp = static_pointer_cast<UdpFactory>(m_factories["udp"]);
+    factoryUdp->deleteChannel(udp::Endpoint(address, m_udpConfig.port)); // TODO mio what if port changes?
+  }*/
+
 }
 
 } // namespace nfd

@@ -28,6 +28,8 @@
 
 #include "channel.hpp"
 
+#include <ndn-cxx/util/network-interface.hpp>
+
 namespace nfd {
 
 namespace udp {
@@ -51,6 +53,7 @@ public:
    * \throw UdpChannel::Error if bind on the socket fails
    */
   UdpChannel(const udp::Endpoint& localEndpoint,
+             const shared_ptr<ndn::util::NetworkInterface>& ni,
              const time::seconds& timeout);
 
   /**
@@ -88,6 +91,9 @@ public:
 
   bool
   isListening() const;
+
+  void
+  close(shared_ptr<UdpChannel> self);
 
 private:
   void
@@ -128,6 +134,8 @@ private:
   time::seconds m_idleFaceTimeout;
 
   uint8_t m_inputBuffer[ndn::MAX_NDN_PACKET_SIZE];
+
+  shared_ptr<ndn::util::NetworkInterface> m_networkInterface;
 };
 
 inline bool

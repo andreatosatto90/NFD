@@ -229,7 +229,7 @@ private:
   onCanonizeFailure(const std::string& reason);
 
   void
-  startFaceCreate(const ndn::util::FaceUri& canonicalUri);
+  startFaceCreate(const ndn::util::FaceUri& canonicalUri, const ndn::util::FaceUri& canonicalLocalUri);
 
   void
   onObtainFaceIdFailure(const std::string& message);

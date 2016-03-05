@@ -23,55 +23,28 @@
  * NFD, e.g., in COPYING.md file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef NFD_DAEMON_FACE_UNICAST_UDP_TRANSPORT_HPP
-#define NFD_DAEMON_FACE_UNICAST_UDP_TRANSPORT_HPP
-
-#include "datagram-transport.hpp"
-#include "core/scheduler.hpp"
-
-#include <ndn-cxx/util/network-interface.hpp> // TODO mio forward decl
+#include "predefined-weight-strategy.hpp"
+#include "core/logger.hpp"
 
 namespace nfd {
-namespace face {
+namespace fw {
 
-/**
- * \brief A Transport that communicates on a unicast UDP socket
- */
-class UnicastUdpTransport DECL_CLASS_FINAL : public DatagramTransport<boost::asio::ip::udp, Unicast>
+NFD_LOG_INIT("PredefinedWeightStrategy");
+
+const Name PredefinedWeightStrategy::STRATEGY_NAME("ndn:/localhost/nfd/strategy/predefined-weight/%FD%01");
+NFD_REGISTER_STRATEGY(PredefinedWeightStrategy);
+
+PredefinedWeightStrategy::PredefinedWeightStrategy(Forwarder& forwarder, const Name& name)
+  : WeightedRandomStrategy(forwarder, name)
 {
-public:
-  UnicastUdpTransport(protocol::socket&& socket,
-                      ndn::nfd::FacePersistency persistency,
-                      time::nanoseconds idleTimeout,
-                      const shared_ptr<ndn::util::NetworkInterface>& ni);
-
-  virtual std::string
-  getInterfaceName() const DECL_FINAL;
-
-protected:
-  virtual void
-  beforeChangePersistency(ndn::nfd::FacePersistency newPersistency) DECL_FINAL;
-
-  void
-  changeStateFromInterface(ndn::util::NetworkInterfaceState state);
-
-private:
-  void
-  scheduleClosureWhenIdle();
-
-private:
-  const time::nanoseconds m_idleTimeout;
-  scheduler::ScopedEventId m_closeIfIdleEvent;
-  shared_ptr<ndn::util::NetworkInterface> m_networkInterface;
-};
-
-inline std::string
-UnicastUdpTransport::getInterfaceName() const
-{
-  return m_networkInterface->getName();
+  // Set weight 1 to preferred interface, 0 to the other
+  m_interfacesInfo.insert(std::make_pair("eth0",InterfaceInfo("eth0", 1)));
+  m_interfacesInfo.insert(std::make_pair("wlan0",InterfaceInfo("wlan0", 1)));
 }
 
-} // namespace face
-} // namespace nfd
+PredefinedWeightStrategy::~PredefinedWeightStrategy()
+{
+}
 
-#endif // NFD_DAEMON_FACE_UNICAST_UDP_TRANSPORT_HPP
+} // namespace fw
+} // namespace nfd

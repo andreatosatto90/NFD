@@ -61,21 +61,21 @@ namespace face {
 
 NFD_LOG_INIT("EthernetTransport");
 
-EthernetTransport::EthernetTransport(const NetworkInterfaceInfo& interface,
+EthernetTransport::EthernetTransport(const shared_ptr<ndn::util::NetworkInterface>& interface,
                                      const ethernet::Address& mcastAddress)
   : m_pcap(nullptr, pcap_close)
   , m_socket(getGlobalIoService())
-  , m_srcAddress(interface.etherAddress)
+  , m_srcAddress(interface->getEthernetAddress())
   , m_destAddress(mcastAddress)
-  , m_interfaceName(interface.name)
+  , m_interfaceName(interface->getName())
 #if defined(__linux__)
-  , m_interfaceIndex(interface.index)
+  , m_interfaceIndex(interface->getIndex())
 #endif
 #ifdef _DEBUG
   , m_nDropped(0)
 #endif
 {
-  this->setLocalUri(FaceUri::fromDev(interface.name));
+  this->setLocalUri(FaceUri::fromDev(interface->getName()));
   this->setRemoteUri(FaceUri(mcastAddress));
   this->setScope(ndn::nfd::FACE_SCOPE_NON_LOCAL);
   this->setPersistency(ndn::nfd::FACE_PERSISTENCY_PERMANENT);

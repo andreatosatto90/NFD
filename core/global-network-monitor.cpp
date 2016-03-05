@@ -23,55 +23,21 @@
  * NFD, e.g., in COPYING.md file.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef NFD_DAEMON_FACE_UNICAST_UDP_TRANSPORT_HPP
-#define NFD_DAEMON_FACE_UNICAST_UDP_TRANSPORT_HPP
+#include "global-network-monitor.hpp"
+#include "global-io.hpp"
 
-#include "datagram-transport.hpp"
-#include "core/scheduler.hpp"
-
-#include <ndn-cxx/util/network-interface.hpp> // TODO mio forward decl
 
 namespace nfd {
-namespace face {
 
-/**
- * \brief A Transport that communicates on a unicast UDP socket
- */
-class UnicastUdpTransport DECL_CLASS_FINAL : public DatagramTransport<boost::asio::ip::udp, Unicast>
+static unique_ptr<NetworkMonitor> g_networkMonitor;
+
+ndn::util::NetworkMonitor&
+getGlobalNetworkMonitor()
 {
-public:
-  UnicastUdpTransport(protocol::socket&& socket,
-                      ndn::nfd::FacePersistency persistency,
-                      time::nanoseconds idleTimeout,
-                      const shared_ptr<ndn::util::NetworkInterface>& ni);
-
-  virtual std::string
-  getInterfaceName() const DECL_FINAL;
-
-protected:
-  virtual void
-  beforeChangePersistency(ndn::nfd::FacePersistency newPersistency) DECL_FINAL;
-
-  void
-  changeStateFromInterface(ndn::util::NetworkInterfaceState state);
-
-private:
-  void
-  scheduleClosureWhenIdle();
-
-private:
-  const time::nanoseconds m_idleTimeout;
-  scheduler::ScopedEventId m_closeIfIdleEvent;
-  shared_ptr<ndn::util::NetworkInterface> m_networkInterface;
-};
-
-inline std::string
-UnicastUdpTransport::getInterfaceName() const
-{
-  return m_networkInterface->getName();
+  if (g_networkMonitor.get() == nullptr) {
+    g_networkMonitor.reset(new NetworkMonitor(getGlobalIoService()));
+  }
+  return *g_networkMonitor;
 }
 
-} // namespace face
 } // namespace nfd
-
-#endif // NFD_DAEMON_FACE_UNICAST_UDP_TRANSPORT_HPP
