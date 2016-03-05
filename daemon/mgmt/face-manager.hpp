@@ -42,6 +42,7 @@
 namespace nfd {
 
 class FaceTable;
+class NetworkInterfaceInfo;
 class ProtocolFactory;
 
 // ; the unix section contains settings of Unix stream faces and channels
