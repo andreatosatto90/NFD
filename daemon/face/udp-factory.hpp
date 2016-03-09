@@ -51,7 +51,7 @@ public:
     }
   };
 
-  typedef std::map<udp::Endpoint, shared_ptr<Face>> MulticastFaceMap;
+  typedef std::map<udp::Endpoint, shared_ptr<Face>> FaceMap;
 
   /**
    * \brief Create UDP-based channel using udp::Endpoint
@@ -100,9 +100,6 @@ public:
                 const shared_ptr<ndn::util::NetworkInterface>& ni,
                 const time::seconds& timeout = time::seconds(600));
 
-  bool
-  deleteChannel(const udp::Endpoint& localEndpoint);
-
   /**
    * \brief Create MulticastUdpFace using udp::Endpoint
    *
@@ -148,8 +145,17 @@ public:
   /**
    * \brief Get map of configured multicast faces
    */
-  const MulticastFaceMap&
+  const FaceMap&
   getMulticastFaces() const;
+
+
+  shared_ptr<Face>
+  createInterfaceFace(const udp::Endpoint& localEndpoint,
+                      const udp::Endpoint& remoteEndpoint,
+                      const shared_ptr<ndn::util::NetworkInterface>& ni);
+
+  const std::map<std::string, FaceMap>&
+  getInterfaceFaces() const;
 
 public: // from ProtocolFactory
   virtual void
@@ -197,18 +203,28 @@ private:
   shared_ptr<Face>
   findMulticastFace(const udp::Endpoint& localEndpoint) const;
 
+  shared_ptr<Face>
+  findInterfaceFace(const std::string& interfaceName, const udp::Endpoint& remoteEndpoint) const;
+
 private:
   std::map<udp::Endpoint, shared_ptr<UdpChannel>> m_channels;
-  MulticastFaceMap m_multicastFaces;
+  FaceMap m_multicastFaces;
+  std::map<std::string, FaceMap> m_interfaceFaces;
 
 PUBLIC_WITH_TESTS_ELSE_PRIVATE:
   std::set<udp::Endpoint> m_prohibitedEndpoints;
 };
 
-inline const UdpFactory::MulticastFaceMap&
+inline const UdpFactory::FaceMap&
 UdpFactory::getMulticastFaces() const
 {
   return m_multicastFaces;
+}
+
+inline const std::map<std::string, UdpFactory::FaceMap>&
+UdpFactory::getInterfaceFaces() const
+{
+  return m_interfaceFaces;
 }
 
 } // namespace nfd

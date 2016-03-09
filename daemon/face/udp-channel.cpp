@@ -192,6 +192,8 @@ UdpChannel::createFace(const udp::Endpoint& remoteEndpoint, ndn::nfd::FacePersis
   // else, create a new face
   ip::udp::socket socket(getGlobalIoService(), m_localEndpoint.protocol());
   socket.set_option(ip::udp::socket::reuse_address(true));
+
+  NFD_LOG_TRACE("Local endpoint bind channel" << m_localEndpoint.address().to_string());
   socket.bind(m_localEndpoint);
   socket.connect(remoteEndpoint);
   NFD_LOG_TRACE("**Local end point " << m_localEndpoint << " real " << socket.local_endpoint());

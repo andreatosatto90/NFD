@@ -657,6 +657,30 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
       }
       NFD_LOG_TRACE("UDP multicast group set to " << m_udpConfig.mcastGroup);
     }
+    else if (i.first == "iface_port") {
+      m_udpConfig.ifacePort = ConfigFile::parseNumber<uint16_t>(i, "udp");
+      NFD_LOG_TRACE("UDP iface port set to " << m_udpConfig.ifacePort );
+    }
+    else if (i.first == "iface_interfaces") {
+      for (const auto& j : i.second) {
+        std::string interfaceName = j.first;
+        m_udpConfig.ifaceInterfaces.push_back(interfaceName);
+        NFD_LOG_TRACE("UDP iface interface added " << interfaceName);
+      }
+    }
+    else if (i.first == "iface_hub_port") {
+      m_udpConfig.ifaceHubPort = ConfigFile::parseNumber<uint16_t>(i, "udp");
+      NFD_LOG_TRACE("UDP iface HUB port set to " << m_udpConfig.ifaceHubPort );
+    }
+    else if (i.first == "iface_hub") {
+      boost::system::error_code ec;
+      m_udpConfig.ifaceHub = boost::asio::ip::address_v4::from_string(i.second.get_value<std::string>(), ec);
+      if (ec) {
+        BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
+                                                i.first + "\" in \"udp\" section"));
+      }
+      NFD_LOG_TRACE("UDP iface HUB set to " << m_udpConfig.ifaceHub);
+    }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
                                               i.first + "\" in \"udp\" section"));
@@ -1032,6 +1056,24 @@ void FaceManager::handleInterfaceAddressAdded(const shared_ptr<ndn::util::Networ
                                                    isNicNameNecessary ? ni->getName() : "");
     m_faceTable.add(newFace);
 
+  }
+
+  // create the interface face
+  if (m_udpConfig.ifaceInterfaces.size() > 0) {
+    for (const auto& nicName : m_udpConfig.ifaceInterfaces) {
+      if(nicName == ni->getName() && !ni->isLoopback()) {
+        if ((address.is_v4() && m_udpConfig.ifaceHub.is_v4()) ||
+            (address.is_v6() && m_udpConfig.ifaceHub.is_v6())) {
+
+          NFD_LOG_TRACE("Create interface face for " << ni->getName());
+          udp::Endpoint localEndpoint(address, m_udpConfig.ifacePort);
+          udp::Endpoint remoteEndpoint(m_udpConfig.ifaceHub, m_udpConfig.ifaceHubPort);
+
+          auto newFace = factoryUdp->createInterfaceFace(localEndpoint, remoteEndpoint, ni);
+          m_faceTable.add(newFace);
+        }
+      }
+    }
   }
 
   NFD_LOG_TRACE("End Interface address added: " << address << " " << ni->getEthernetAddress());

@@ -25,6 +25,7 @@
 
 #include "udp-factory.hpp"
 #include "generic-link-service.hpp"
+#include "unicast-udp-transport.hpp"
 #include "multicast-udp-transport.hpp"
 #include "core/global-io.hpp"
 #include "core/global-network-monitor.hpp"
@@ -129,18 +130,6 @@ UdpFactory::createChannel(const std::string& localIp,
   return createChannel(endpoint, ni, timeout);
 }
 
-bool UdpFactory::deleteChannel(const udp::Endpoint& localEndpoint)
-{
-  shared_ptr<UdpChannel> channel = findChannel(localEndpoint); // TODO mio auto
-  if (channel) {
-    channel->close(channel);
-    m_channels.erase(localEndpoint);
-    m_prohibitedEndpoints.erase(localEndpoint); // TODO mio handle 0.0.0.0
-    return true;
-  }
-  return false;
-}
-
 shared_ptr<Face>
 UdpFactory::createMulticastFace(const udp::Endpoint& localEndpoint,
                                 const udp::Endpoint& multicastEndpoint,
@@ -243,6 +232,68 @@ UdpFactory::createMulticastFace(const std::string& localIp,
   udp::Endpoint multicastEndpoint(ip::address::from_string(multicastIp),
                                   boost::lexical_cast<uint16_t>(multicastPort));
   return createMulticastFace(localEndpoint, multicastEndpoint, networkInterfaceName);
+}
+
+shared_ptr<nfd::face::Face> UdpFactory::createInterfaceFace(const udp::Endpoint& localEndpoint,
+                                                            const udp::Endpoint& remoteEndpoint,
+                                                            const shared_ptr<ndn::util::NetworkInterface>& ni)
+{
+  // checking if the local and multicast endpoints are already in use for a multicast face
+  auto face = findInterfaceFace(ni->getName(), remoteEndpoint);
+  if (face)
+    return face;
+
+  // checking if the local endpoint is already in use for a unicast channel
+  auto unicastCh = findChannel(localEndpoint);
+  if (unicastCh) {
+    BOOST_THROW_EXCEPTION(Error("Cannot create the requested UDP interface face, local "
+                                "endpoint is already allocated for a UDP unicast channel"));
+  }
+
+  if (m_prohibitedEndpoints.find(localEndpoint) != m_prohibitedEndpoints.end()) {
+    BOOST_THROW_EXCEPTION(Error("Cannot create the requested UDP interface face, "
+                                "local endpoint is owned by this NFD instance"));
+  }
+
+  if (localEndpoint.address().is_multicast()) {
+    BOOST_THROW_EXCEPTION(Error("createInterfaceFace is only for unicast channels. The provided local "
+                                "endpoint is multicast. Use createMulticastFace to create a multicast face"));
+  }
+
+  if (remoteEndpoint.address().is_multicast()) {
+    BOOST_THROW_EXCEPTION(Error("createInterfaceFace is only for unicast channels. The provided remote "
+                                "endpoint is multicast. Use createMulticastFace to create a multicast face"));
+  }
+
+  /*if (localEndpoint.address().is_v6() || remoteEndpoint.address().is_v6()) {
+    BOOST_THROW_EXCEPTION(Error("IPv6 multicast is not supported yet. Please provide an IPv4 "
+                                "address"));
+  }*/
+
+  /*if (localEndpoint.port() != remoteEndpoint.port()) {
+    BOOST_THROW_EXCEPTION(Error("Cannot create the requested UDP multicast face, "
+                                "both endpoints should have the same port number. "));
+  }*/ // TODO Why?
+
+  ip::udp::socket socket(getGlobalIoService(), localEndpoint.protocol());
+  socket.set_option(ip::udp::socket::reuse_address(true));
+  NFD_LOG_TRACE("Local endpoint bind " << localEndpoint.address().to_string());
+  socket.bind(localEndpoint);
+  socket.connect(remoteEndpoint);
+
+  auto linkService = make_unique<face::GenericLinkService>();
+  //TODO mio auto
+  unique_ptr<face::UnicastUdpTransport> transport =
+      make_unique<face::UnicastUdpTransport>(std::move(socket), ndn::nfd::FACE_PERSISTENCY_PERMANENT,
+                                             time::seconds(0), ni);
+  face = make_shared<Face>(std::move(linkService), std::move(transport));
+
+  auto& faces = m_interfaceFaces[ni->getName()];
+  faces[remoteEndpoint] = face;
+  connectFaceClosedSignal(*face, [this, ni] { m_interfaceFaces.erase(ni->getName()); });
+  prohibitEndpoint(localEndpoint); //TODO check
+
+  return face;
 }
 
 void
@@ -351,8 +402,22 @@ UdpFactory::findMulticastFace(const udp::Endpoint& localEndpoint) const
   auto i = m_multicastFaces.find(localEndpoint);
   if (i != m_multicastFaces.end())
     return i->second;
-  else
-    return nullptr;
+
+  return nullptr;
+}
+
+shared_ptr<nfd::face::Face>
+UdpFactory::findInterfaceFace(const std::string& interfaceName,
+                              const udp::Endpoint& remoteEndpoint) const
+{
+  auto i = m_interfaceFaces.find(interfaceName);
+  if (i != m_interfaceFaces.end()) {
+    auto j = i->second.find(remoteEndpoint);
+    if (j != i->second.end())
+      return j->second;
+  }
+
+  return nullptr;
 }
 
 } // namespace nfd

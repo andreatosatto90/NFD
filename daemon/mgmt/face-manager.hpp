@@ -88,6 +88,11 @@ struct UdpConfig {
   bool useMcast = true;
   boost::asio::ip::address_v4 mcastGroup = boost::asio::ip::address_v4::from_string("224.0.23.170");
   uint16_t mcastPort = 56363;
+
+  std::vector<std::string> ifaceInterfaces;
+  uint16_t ifacePort = 6364;
+  boost::asio::ip::address ifaceHub;
+  uint16_t ifaceHubPort = 6364;
 };
 
 // ; the ether section contains settings of Ethernet faces and channels
