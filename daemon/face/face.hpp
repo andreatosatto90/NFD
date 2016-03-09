@@ -155,6 +155,9 @@ public: // dynamic properties
   FaceState
   getState() const;
 
+  std::string
+  getInterfaceName() const;
+
   /** \brief signals after face state changed
    */
   signal::Signal<Transport, FaceState/*old*/, FaceState/*new*/>& afterStateChange;
@@ -270,6 +273,12 @@ inline FaceState
 Face::getState() const
 {
   return m_transport->getState();
+}
+
+inline std::string
+Face::getInterfaceName() const
+{
+  return m_transport->getInterfaceName();
 }
 
 inline time::steady_clock::TimePoint

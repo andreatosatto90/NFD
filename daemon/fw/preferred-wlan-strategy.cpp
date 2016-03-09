@@ -87,9 +87,9 @@ predicate_NextHop_eligible(const shared_ptr<pit::Entry>& pitEntry,
 
 void
 PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
-                                             const Interest& interest,
-                                             shared_ptr<fib::Entry> fibEntry,
-                                             shared_ptr<pit::Entry> pitEntry)
+                                            const Interest& interest,
+                                            shared_ptr<fib::Entry> fibEntry,
+                                            shared_ptr<pit::Entry> pitEntry)
 {
   const fib::NextHopList& nexthops = fibEntry->getNextHops();
   std::vector<shared_ptr<Face>> eligibleFaces;
@@ -100,7 +100,8 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
                                    getFaceWeight(nextHop.getFace()), time::steady_clock::now())) {
       shared_ptr<Face> outFace = nextHop.getFace();
       eligibleFaces.push_back(outFace);
-      tracepoint(strategyLog, weighted_random, outFace->getId(), STRATEGY_NAME.toUri().c_str());
+      tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
+                 outFace->getId(), outFace->getTransport()->getInterfaceName().c_str());
     }
   }
 
@@ -111,7 +112,8 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
                                      getFaceWeight(nextHop.getFace()),time::steady_clock::now())) {
         shared_ptr<Face> outFace = nextHop.getFace();
         eligibleFaces.push_back(outFace);
-        tracepoint(strategyLog, weighted_random, outFace->getId(), STRATEGY_NAME.toUri().c_str());
+        tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
+                   outFace->getId(), outFace->getInterfaceName().c_str());
       }
     }
   }
@@ -127,6 +129,16 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
 
   this->rejectPendingInterest(pitEntry);
   return;
+}
+
+void
+PreferredWlanStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
+                                              const nfd::face::Face& inFace,
+                                              const ndn::Data& data)
+{
+  if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
+    tracepoint(strategyLog, data_received, STRATEGY_NAME.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
+               inFace.getId(), inFace.getInterfaceName().c_str());
 }
 
 int

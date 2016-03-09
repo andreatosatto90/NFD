@@ -45,6 +45,10 @@ public:
                        shared_ptr<fib::Entry> fibEntry,
                        shared_ptr<pit::Entry> pitEntry) DECL_OVERRIDE;
 
+  virtual void
+  beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
+                        const Face& inFace, const Data& data) DECL_OVERRIDE;
+
 protected:
   class InterfaceInfo
   {

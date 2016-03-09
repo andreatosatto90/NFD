@@ -30,6 +30,7 @@
 #include "face/udp-factory.hpp"
 #include "fw/face-table.hpp"
 #include "core/global-network-monitor.hpp"
+#include "mgmt-tracepoint.hpp"
 
 #include <ndn-cxx/management/nfd-channel-status.hpp>
 #include <ndn-cxx/management/nfd-face-status.hpp>
@@ -922,6 +923,12 @@ void FaceManager::handleInterfaceStateChanged(const shared_ptr<ndn::util::Networ
                                               ndn::util::NetworkInterfaceState oldState,
                                               ndn::util::NetworkInterfaceState newState)
 {
+  std::ostringstream str;
+  str << newState;
+  // TODO fast to write but shitty
+  tracepoint(mgmtLog, network_state, ni->getName().c_str(), str.str().c_str());
+
+
   // TODO mio check old state?
   if (oldState == ndn::util::NetworkInterfaceState::RUNNING) {
     // newState <= ndn::util::NetworkInterfaceState::RUNNING
@@ -966,6 +973,8 @@ FaceManager::handleInterfaceRemoved(const shared_ptr<ndn::util::NetworkInterface
 void FaceManager::handleInterfaceAddressAdded(const shared_ptr<ndn::util::NetworkInterface>& ni,
                                               boost::asio::ip::address address)
 {
+  tracepoint(mgmtLog, address_added, ni->getName().c_str(), address.to_string().c_str());
+
   NFD_LOG_TRACE("Interface address added: " << address << " " << ni->getEthernetAddress());
   // UDP section
   shared_ptr<UdpFactory> factoryUdp;
@@ -1031,7 +1040,7 @@ void FaceManager::handleInterfaceAddressAdded(const shared_ptr<ndn::util::Networ
 void FaceManager::handleInterfaceAddressRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni,
                                                 boost::asio::ip::address address)
 {
-
+  tracepoint(mgmtLog, address_removed, ni->getName().c_str(), address.to_string().c_str());
   NFD_LOG_TRACE("Interface address removed: " << address << " " << ni->getEthernetAddress());
   // UDP section
   /*if (m_factories.count("udp") > 0) {

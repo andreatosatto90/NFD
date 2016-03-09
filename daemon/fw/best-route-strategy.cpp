@@ -49,9 +49,9 @@ predicate_PitEntry_canForwardTo_NextHop(shared_ptr<pit::Entry> pitEntry,
 
 void
 BestRouteStrategy::afterReceiveInterest(const Face& inFace,
-                   const Interest& interest,
-                   shared_ptr<fib::Entry> fibEntry,
-                   shared_ptr<pit::Entry> pitEntry)
+                                        const Interest& interest,
+                                        shared_ptr<fib::Entry> fibEntry,
+                                        shared_ptr<pit::Entry> pitEntry)
 {
   if (pitEntry->hasUnexpiredOutRecords()) {
     // not a new Interest, don't forward

@@ -94,7 +94,8 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
       if (prob > 0) {
         totalWeight += prob;
         eligibleFaces[totalWeight] = outFace;
-        tracepoint(strategyLog, weighted_random, outFace->getId(), m_name.toUri().c_str());
+        tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
+                   outFace->getId(), outFace->getInterfaceName().c_str());
         //NFD_LOG_TRACE("Eligible face: " << outFace->getId());
       }
     }
@@ -119,17 +120,26 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
   else
     NFD_LOG_TRACE("No eligible faces");
 
-
   NFD_LOG_TRACE("Interest rejected");
 
   this->rejectPendingInterest(pitEntry);
   return;
 }
 
+void
+WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
+                                              const nfd::face::Face& inFace,
+                                              const ndn::Data& data)
+{
+  if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
+    tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
+               inFace.getId(), inFace.getInterfaceName().c_str());
+}
+
 int
 WeightedRandomStrategy::getFaceWeight(const shared_ptr<Face>& face) const
 {
-  std::string nicName = face->getTransport()->getInterfaceName();
+  std::string nicName = face->getInterfaceName();
   auto it = m_interfacesInfo.find(nicName);
   if (it != m_interfacesInfo.end())
     return it->second.weight;
