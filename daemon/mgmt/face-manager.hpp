@@ -99,8 +99,10 @@ struct UdpConfig {
 // }
 
 struct EtherConfig {
-  bool useMcast = true;
-  ethernet::Address mcastGroup = ethernet::getDefaultMulticastAddress();
+  #ifdef HAVE_LIBPCAP
+    bool useMcast = true;
+    ethernet::Address mcastGroup = ethernet::getDefaultMulticastAddress();
+  #endif // HAVE_LIBPCAP
 };
 
 // ; the websocket section contains settings of WebSocket faces and channels
