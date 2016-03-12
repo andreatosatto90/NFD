@@ -32,6 +32,13 @@
 #include <array>
 
 namespace nfd {
+
+namespace ip = boost::asio::ip;
+
+namespace udp {
+typedef boost::asio::ip::udp::endpoint Endpoint;
+} // namespace udp
+
 namespace face {
 
 struct Unicast {};
@@ -54,6 +61,11 @@ public:
   explicit
   DatagramTransport(typename protocol::socket&& socket);
 
+  /** \brief Construct datagram transport.
+   */
+  explicit
+  DatagramTransport(typename protocol::endpoint remoteEndpoint);
+
   /** \brief Receive datagram, translate buffer into packet, deliver to parent class.
    */
   void
@@ -61,6 +73,9 @@ public:
                   const boost::system::error_code& error);
 
 protected:
+  void
+  rebindSocket(typename protocol::endpoint localEndpoint);
+
   virtual void
   doClose() DECL_OVERRIDE;
 
@@ -89,6 +104,7 @@ protected:
 
 protected:
   typename protocol::socket m_socket;
+  unique_ptr<typename protocol::socket> m_socket2;
   typename protocol::endpoint m_sender;
 
   NFD_LOG_INCLASS_DECLARE();
@@ -96,6 +112,7 @@ protected:
 private:
   std::array<uint8_t, ndn::MAX_NDN_PACKET_SIZE> m_receiveBuffer;
   bool m_hasBeenUsedRecently;
+  typename protocol::endpoint m_remoteEndpoint;
 };
 
 
@@ -104,10 +121,20 @@ DatagramTransport<T, U>::DatagramTransport(typename DatagramTransport::protocol:
   : m_socket(std::move(socket))
   , m_hasBeenUsedRecently(false)
 {
+
+
   m_socket.async_receive_from(boost::asio::buffer(m_receiveBuffer), m_sender,
                               bind(&DatagramTransport<T, U>::handleReceive, this,
                                    boost::asio::placeholders::error,
                                    boost::asio::placeholders::bytes_transferred));
+}
+
+template<class T, class U>
+DatagramTransport<T, U>::DatagramTransport(typename protocol::endpoint remoteEndpoint)
+  : m_socket(getGlobalIoService(), remoteEndpoint.protocol()) // TODO without protocol we have a bad file descriptor error
+  , m_hasBeenUsedRecently(false)
+  , m_remoteEndpoint(remoteEndpoint)
+{
 }
 
 template<class T, class U>
@@ -137,11 +164,13 @@ DatagramTransport<T, U>::doSend(Transport::Packet&& packet)
 {
   NFD_LOG_FACE_TRACE(__func__);
 
-  m_socket.async_send(boost::asio::buffer(packet.packet),
-                      bind(&DatagramTransport<T, U>::handleSend, this,
-                           boost::asio::placeholders::error,
-                           boost::asio::placeholders::bytes_transferred,
-                           packet.packet));
+  if (m_socket.is_open()) {
+    m_socket.async_send(boost::asio::buffer(packet.packet),
+                        bind(&DatagramTransport<T, U>::handleSend, this,
+                             boost::asio::placeholders::error,
+                             boost::asio::placeholders::bytes_transferred,
+                             packet.packet));
+  }
 }
 
 template<class T, class U>
@@ -172,6 +201,43 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
   Transport::Packet tp(std::move(element));
   tp.remoteEndpoint = makeEndpointId(m_sender);
   this->receive(std::move(tp));
+}
+
+template<class T, class U>
+void
+DatagramTransport<T, U>::rebindSocket(typename protocol::endpoint localEndpoint)
+
+{
+  if (m_socket.is_open()) {
+    NFD_LOG_TRACE("loller");
+    // Cancel all outstanding operations and close the socket.
+    // Use the non-throwing variants and ignore errors, if any.
+    boost::system::error_code error;
+    m_socket.cancel(error);
+    m_socket.close(error);
+  }
+  NFD_LOG_TRACE("poller");
+
+  // TODO is it possible to reuse the old socket?
+  m_socket = ip::udp::socket(getGlobalIoService(), localEndpoint.protocol());
+  m_socket.set_option(ip::udp::socket::reuse_address(true));
+  NFD_LOG_TRACE("Local endpoint bind " << localEndpoint.address().to_string());
+  try {
+    m_socket.bind(localEndpoint);
+
+    NFD_LOG_FACE_INFO("Connecting");
+    m_socket.connect(m_remoteEndpoint);
+
+    m_socket.async_receive_from(boost::asio::buffer(m_receiveBuffer), m_sender,
+                                bind(&DatagramTransport<T, U>::handleReceive, this,
+                                     boost::asio::placeholders::error,
+                                     boost::asio::placeholders::bytes_transferred));
+  }
+  catch (const std::exception& e) {
+
+    NFD_LOG_FACE_INFO("Bind error");
+  }
+
 }
 
 template<class T, class U>

@@ -43,16 +43,20 @@ UnicastUdpTransport::UnicastUdpTransport(protocol::socket&& socket,
                                          ndn::nfd::FacePersistency persistency,
                                          time::nanoseconds idleTimeout,
                                          const shared_ptr<ndn::util::NetworkInterface>& ni)
-  : DatagramTransport(std::move(socket))
+  : DatagramTransport(std::move(socket)) // TODO what if we don't want to specify a socket?
   , m_idleTimeout(idleTimeout)
   , m_networkInterface(ni)
-{
+  , m_hasAddress(false)
+{ 
   this->setLocalUri(FaceUri(m_socket.local_endpoint()));
+
   this->setRemoteUri(FaceUri(m_socket.remote_endpoint()));
   this->setScope(ndn::nfd::FACE_SCOPE_NON_LOCAL);
   this->setPersistency(persistency);
   this->setLinkType(ndn::nfd::LINK_TYPE_POINT_TO_POINT);
   this->setMtu(udp::computeMtu(m_socket.local_endpoint()));
+
+  m_hasAddress =true;
 
   NFD_LOG_FACE_INFO("Creating transport");
 
@@ -82,7 +86,40 @@ UnicastUdpTransport::UnicastUdpTransport(protocol::socket&& socket,
   }
 
   m_networkInterface->onStateChanged.connect(bind(&UnicastUdpTransport::changeStateFromInterface,
-                                             this, _2));
+                                                  this, _2));
+}
+
+UnicastUdpTransport::UnicastUdpTransport(short localEndpointPort,
+                                         udp::Endpoint remoteEndpoint,
+                                         const shared_ptr<ndn::util::NetworkInterface>& ni)
+  : DatagramTransport(remoteEndpoint) // TODO what if we don't want to specify a socket?
+  , m_networkInterface(ni)
+  , m_hasAddress(false)
+  , m_localEndpointPort(localEndpointPort)
+{
+  // Set local URI
+  std::string localUri;
+  remoteEndpoint.address().is_v6() ? localUri = "udp6://" : localUri = "udp4://";
+  localUri += ni->getName() + ":" + std::to_string(localEndpointPort);
+  this->setLocalUri(FaceUri(localUri));
+
+  this->setRemoteUri(FaceUri(remoteEndpoint));
+  this->setScope(ndn::nfd::FACE_SCOPE_NON_LOCAL);
+  this->setPersistency(ndn::nfd::FacePersistency::FACE_PERSISTENCY_PERMANENT);
+  this->setLinkType(ndn::nfd::LINK_TYPE_POINT_TO_POINT);
+  this->setMtu(ni->getMtu());
+
+  NFD_LOG_FACE_INFO("Creating transport");
+
+  m_networkInterface->onStateChanged.connect(bind(&UnicastUdpTransport::changeStateFromInterface, this, _2));
+  m_networkInterface->onAddressAdded.connect(bind(&UnicastUdpTransport::handleAddressAdded, this, _1));
+  m_networkInterface->onAddressRemoved.connect(bind(&UnicastUdpTransport::handleAddressRemoved, this, _1));
+
+  NFD_LOG_FACE_INFO("Asder");
+
+  changeSocketLocalAddress();
+
+  NFD_LOG_FACE_INFO("Loller");
 }
 
 void
@@ -129,6 +166,88 @@ UnicastUdpTransport::scheduleClosureWhenIdle()
     }
   });
   setExpirationTime(time::steady_clock::now() + m_idleTimeout);
+}
+
+void UnicastUdpTransport::handleAddressAdded(boost::asio::ip::address address)
+{
+  if (!m_hasAddress) {
+    NFD_LOG_FACE_INFO("address added " << address);
+    bool isTransportV6;
+    getLocalUri().getScheme() == "udp4" ? isTransportV6 = false : isTransportV6 = true;
+    changeSocketLocalAddress();
+
+//    if ((!isTransportV6 && address.is_v4()) || (isTransportV6 && address.is_v6()))
+//    {
+
+//    }
+
+  }
+}
+
+void UnicastUdpTransport::handleAddressRemoved(boost::asio::ip::address address)
+{
+  if (m_socket.local_endpoint().address() == address) {
+    m_hasAddress = false;
+    changeSocketLocalAddress();
+
+    if (!m_hasAddress) {
+      /*if (m_socket.is_open()) { // TODO remove
+        NFD_LOG_TRACE("loller");
+        // Cancel all outstanding operations and close the socket.
+        // Use the non-throwing variants and ignore errors, if any.
+        boost::system::error_code error;
+        m_socket.cancel(error);
+        m_socket.close(error);
+      }*/
+    }
+  }
+}
+
+void UnicastUdpTransport::changeSocketLocalAddress()
+{
+  NFD_LOG_FACE_INFO("Changing ");
+  bool isTransportV6;
+  getLocalUri().getScheme() == "udp4" ? isTransportV6 = false : isTransportV6 = true;
+
+  boost::asio::ip::address address;
+  if (!isTransportV6) {
+    for (const boost::asio::ip::address_v4& addr : m_networkInterface->getIpv4Addresses()) {
+      if(!addr.is_loopback() && !addr.is_multicast())
+        address = addr;
+    }
+  }
+  else {
+    for (const boost::asio::ip::address_v6& addr : m_networkInterface->getIpv6Addresses()) {
+      if(!addr.is_loopback() && !addr.is_multicast() && !addr.is_multicast_link_local())
+        address = addr;
+    }
+  }
+
+  if (!address.is_unspecified() && !address.is_loopback()) {
+    NFD_LOG_FACE_INFO("Changing to " << address);
+    rebindSocket(udp::Endpoint(address, m_localEndpointPort));
+    m_hasAddress = true;
+
+#ifdef __linux__
+    //
+    // By default, Linux does path MTU discovery on IPv4 sockets,
+    // and sets the DF (Don't Fragment) flag on datagrams smaller
+    // than the interface MTU. However this does not work for us,
+    // because we cannot properly respond to ICMP "packet too big"
+    // messages by fragmenting the packet at the application level,
+    // since we want to rely on IP for fragmentation and reassembly.
+    //
+    // Therefore, we disable PMTU discovery, which prevents the kernel
+    // from setting the DF flag on outgoing datagrams, and thus allows
+    // routers along the path to perform fragmentation as needed.
+    //
+    const int value = IP_PMTUDISC_DONT;
+    if (::setsockopt(m_socket.native_handle(), IPPROTO_IP,
+                     IP_MTU_DISCOVER, &value, sizeof(value)) < 0) {
+      NFD_LOG_FACE_WARN("Failed to disable path MTU discovery: " << std::strerror(errno));
+    }
+#endif
+  }
 }
 
 } // namespace face

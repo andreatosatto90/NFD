@@ -150,7 +150,7 @@ public:
 
 
   shared_ptr<Face>
-  createInterfaceFace(const udp::Endpoint& localEndpoint,
+  createInterfaceFace(short localEndpointPort,
                       const udp::Endpoint& remoteEndpoint,
                       const shared_ptr<ndn::util::NetworkInterface>& ni);
 

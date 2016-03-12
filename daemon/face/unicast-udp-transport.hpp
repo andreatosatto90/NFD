@@ -45,6 +45,10 @@ public:
                       time::nanoseconds idleTimeout,
                       const shared_ptr<ndn::util::NetworkInterface>& ni);
 
+  UnicastUdpTransport(short localEndpointPort,
+                      udp::Endpoint remoteEndpoint,
+                      const shared_ptr<ndn::util::NetworkInterface>& ni);
+
   virtual std::string
   getInterfaceName() const DECL_FINAL;
 
@@ -59,10 +63,21 @@ private:
   void
   scheduleClosureWhenIdle();
 
+  void
+  handleAddressAdded(boost::asio::ip::address address);
+
+  void
+  handleAddressRemoved(boost::asio::ip::address address);
+
+  void
+  changeSocketLocalAddress();
+
 private:
   const time::nanoseconds m_idleTimeout;
   scheduler::ScopedEventId m_closeIfIdleEvent;
   shared_ptr<ndn::util::NetworkInterface> m_networkInterface;
+  bool m_hasAddress;
+  short m_localEndpointPort;
 };
 
 inline std::string

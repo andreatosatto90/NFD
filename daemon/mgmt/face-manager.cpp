@@ -938,6 +938,37 @@ FaceManager::handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>&
   ni->onAddressRemoved.connect(bind(&FaceManager::handleInterfaceAddressRemoved, this, ni, _1));
   NFD_LOG_TRACE("Interface added: " << ni->getName());
 
+  shared_ptr<UdpFactory> factoryUdp;
+  bool isReload = false;
+  if (m_factories.count("udp") > 0) {
+    isReload = true;
+    factoryUdp = static_pointer_cast<UdpFactory>(m_factories["udp"]);
+  }
+  else {
+    factoryUdp = make_shared<UdpFactory>();
+    m_factories.insert(std::make_pair("udp", factoryUdp));
+  }
+
+  // create the interface face
+  if (m_udpConfig.ifaceInterfaces.size() > 0) {
+    for (const auto& nicName : m_udpConfig.ifaceInterfaces) {
+      if(nicName == ni->getName() && !ni->isLoopback()) {
+
+        NFD_LOG_TRACE("Create interface face for " << ni->getName());
+        udp::Endpoint remoteEndpoint(m_udpConfig.ifaceHub, m_udpConfig.ifaceHubPort);
+
+        auto newFace = factoryUdp->createInterfaceFace(m_udpConfig.ifacePort, remoteEndpoint, ni);
+        m_faceTable.add(newFace);
+
+      }
+    }
+  }
+
+  if (!isReload)
+    m_factories.insert(std::make_pair("udp4", factoryUdp)); // TODO better factory creation
+
+  NFD_LOG_TRACE("End Interface address added: " << ni->getName());
+
   // No section Unix
   // No section TCP, only addresses change are handled
 
@@ -1058,25 +1089,6 @@ void FaceManager::handleInterfaceAddressAdded(const shared_ptr<ndn::util::Networ
 
   }
 
-  // create the interface face
-  if (m_udpConfig.ifaceInterfaces.size() > 0) {
-    for (const auto& nicName : m_udpConfig.ifaceInterfaces) {
-      if(nicName == ni->getName() && !ni->isLoopback()) {
-        if ((address.is_v4() && m_udpConfig.ifaceHub.is_v4()) ||
-            (address.is_v6() && m_udpConfig.ifaceHub.is_v6())) {
-
-          NFD_LOG_TRACE("Create interface face for " << ni->getName());
-          udp::Endpoint localEndpoint(address, m_udpConfig.ifacePort);
-          udp::Endpoint remoteEndpoint(m_udpConfig.ifaceHub, m_udpConfig.ifaceHubPort);
-
-          auto newFace = factoryUdp->createInterfaceFace(localEndpoint, remoteEndpoint, ni);
-          m_faceTable.add(newFace);
-        }
-      }
-    }
-  }
-
-  NFD_LOG_TRACE("End Interface address added: " << address << " " << ni->getEthernetAddress());
 }
 
 void FaceManager::handleInterfaceAddressRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni,
