@@ -91,8 +91,7 @@ struct UdpConfig {
 
   std::vector<std::string> ifaceInterfaces;
   uint16_t ifacePort = 6364;
-  boost::asio::ip::address ifaceHub;
-  uint16_t ifaceHubPort = 6364;
+  std::vector<boost::asio::ip::udp::endpoint> ifaceHubVector;
 };
 
 // ; the ether section contains settings of Ethernet faces and channels

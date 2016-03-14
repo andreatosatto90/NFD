@@ -668,18 +668,34 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
         NFD_LOG_TRACE("UDP iface interface added " << interfaceName);
       }
     }
-    else if (i.first == "iface_hub_port") {
-      m_udpConfig.ifaceHubPort = ConfigFile::parseNumber<uint16_t>(i, "udp");
-      NFD_LOG_TRACE("UDP iface HUB port set to " << m_udpConfig.ifaceHubPort );
-    }
     else if (i.first == "iface_hub") {
-      boost::system::error_code ec;
-      m_udpConfig.ifaceHub = boost::asio::ip::address_v4::from_string(i.second.get_value<std::string>(), ec);
-      if (ec) {
-        BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
-                                                i.first + "\" in \"udp\" section"));
+      boost::asio::ip::udp::endpoint hub;
+      bool hasAddress = false;
+      bool hasPort = false;
+
+      for (const auto& j : i.second) {
+        if (j.first == "address") {
+          boost::system::error_code ec;
+          hub.address(boost::asio::ip::address::from_string(j.second.get_value<std::string>(), ec));
+          hasAddress = true;
+          if (ec) {
+            BOOST_THROW_EXCEPTION(ConfigFile::Error("Invalid value for option \"" +
+                                                    j.first + "\" in \"udp\" section"));
+          }
+          NFD_LOG_TRACE("UDP iface HUB set to " << hub.address());
+        }
+        else if (j.first == "port") {
+          hub.port(ConfigFile::parseNumber<uint16_t>(j, "udp"));
+          hasPort = true;
+          NFD_LOG_TRACE("UDP iface HUB port set to " << hub.port());
+        }
+
       }
-      NFD_LOG_TRACE("UDP iface HUB set to " << m_udpConfig.ifaceHub);
+      if (hasAddress && hasPort)
+        m_udpConfig.ifaceHubVector.push_back(hub);
+      else
+        BOOST_THROW_EXCEPTION(ConfigFile::Error("Address and port must be specified for option  \"" +
+                                                i.first + "\" in \"udp\" section"));
     }
     else {
       BOOST_THROW_EXCEPTION(ConfigFile::Error("Unrecognized option \"" +
@@ -697,7 +713,7 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
                                             " have been disabled (conflicting configuration options set)"));
   }
 
-  if (!isDryRun) { // TODO mio delete or restore old code
+  /*if (!isDryRun) { // TODO mio delete or restore old code
     shared_ptr<UdpFactory> factory;
     bool isReload = false;
     if (m_factories.count("udp") > 0) {
@@ -727,7 +743,7 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
     }
 
     // TODO mio abilitare dopo cambio struttura indirizzi network monitor
-    /*if (enableV6) {
+    if (enableV6) {
       for (const shared_ptr<ndn::util::NetworkInterface>& ni : nicList) {
         if (ni->isUp() && !ni->getIpv6Addresses().empty() && !ni->isLoopback()) {
           for (const boost::asio::ip::address_v6& address : ni->getIpv6Addresses()) {
@@ -740,7 +756,7 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
 
       if (!isReload)
         m_factories.insert(std::make_pair("udp6", factory));
-    }*/
+    }
 
     std::set<shared_ptr<Face>> multicastFacesToRemove;
     for (const auto& i : factory->getMulticastFaces()) {
@@ -777,7 +793,7 @@ FaceManager::processSectionUdp(const ConfigSection& configSection, bool isDryRun
     for (const auto& face : multicastFacesToRemove) {
       face->close();
     }
-  }
+  }*/
 }
 
 void
@@ -953,13 +969,12 @@ FaceManager::handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>&
   if (m_udpConfig.ifaceInterfaces.size() > 0) {
     for (const auto& nicName : m_udpConfig.ifaceInterfaces) {
       if(nicName == ni->getName() && !ni->isLoopback()) {
+        for(auto& hubEndpoint : m_udpConfig.ifaceHubVector) {
+          NFD_LOG_TRACE("Create interface face for " << ni->getName() << " to " << hubEndpoint);
 
-        NFD_LOG_TRACE("Create interface face for " << ni->getName());
-        udp::Endpoint remoteEndpoint(m_udpConfig.ifaceHub, m_udpConfig.ifaceHubPort);
-
-        auto newFace = factoryUdp->createInterfaceFace(m_udpConfig.ifacePort, remoteEndpoint, ni);
-        m_faceTable.add(newFace);
-
+          auto newFace = factoryUdp->createInterfaceFace(m_udpConfig.ifacePort, hubEndpoint, ni);
+          m_faceTable.add(newFace);
+        }
       }
     }
   }
@@ -980,7 +995,7 @@ void FaceManager::handleInterfaceStateChanged(const shared_ptr<ndn::util::Networ
 {
   std::ostringstream str;
   str << newState;
-  // TODO fast to write but shitty
+  // TODO one line conversion?
   tracepoint(mgmtLog, network_state, ni->getName().c_str(), str.str().c_str());
 
 

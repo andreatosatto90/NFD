@@ -120,6 +120,29 @@ face_system
     mcast yes ; set to 'no' to disable UDP multicast, default 'yes'
     mcast_port 56363 ; UDP multicast port number
     mcast_group 224.0.23.170 ; UDP multicast group (IPv4 only)
+
+   iface_interfaces
+    {
+      eth0
+      wlan0
+    }
+    iface_port 6373
+
+  ; You may have multiple iface_hub sections that specify multiple
+  ; hub for each interface
+    
+  ; iface_hub 
+  ; {
+  ;   address 192.168.2.1
+  ;   port 6363
+  ; }
+
+  ; iface_hub 
+  ; {
+  ;   address 192.168.1.153
+  ;   port 6363
+  ; }
+
   }
 
   ; The ether section contains settings of Ethernet faces and channels.

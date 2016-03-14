@@ -115,11 +115,7 @@ UnicastUdpTransport::UnicastUdpTransport(short localEndpointPort,
   m_networkInterface->onAddressAdded.connect(bind(&UnicastUdpTransport::handleAddressAdded, this, _1));
   m_networkInterface->onAddressRemoved.connect(bind(&UnicastUdpTransport::handleAddressRemoved, this, _1));
 
-  NFD_LOG_FACE_INFO("Asder");
-
-  changeSocketLocalAddress();
-
-  NFD_LOG_FACE_INFO("Loller");
+  changeSocketLocalAddress();;
 }
 
 void
@@ -171,16 +167,9 @@ UnicastUdpTransport::scheduleClosureWhenIdle()
 void UnicastUdpTransport::handleAddressAdded(boost::asio::ip::address address)
 {
   if (!m_hasAddress) {
-    NFD_LOG_FACE_INFO("address added " << address);
     bool isTransportV6;
     getLocalUri().getScheme() == "udp4" ? isTransportV6 = false : isTransportV6 = true;
     changeSocketLocalAddress();
-
-//    if ((!isTransportV6 && address.is_v4()) || (isTransportV6 && address.is_v6()))
-//    {
-
-//    }
-
   }
 }
 
@@ -205,7 +194,6 @@ void UnicastUdpTransport::handleAddressRemoved(boost::asio::ip::address address)
 
 void UnicastUdpTransport::changeSocketLocalAddress()
 {
-  NFD_LOG_FACE_INFO("Changing ");
   bool isTransportV6;
   getLocalUri().getScheme() == "udp4" ? isTransportV6 = false : isTransportV6 = true;
 
@@ -224,7 +212,7 @@ void UnicastUdpTransport::changeSocketLocalAddress()
   }
 
   if (!address.is_unspecified() && !address.is_loopback()) {
-    NFD_LOG_FACE_INFO("Changing to " << address);
+    NFD_LOG_FACE_INFO("Changing local address to " << address);
     rebindSocket(udp::Endpoint(address, m_localEndpointPort));
     m_hasAddress = true;
 

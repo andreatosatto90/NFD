@@ -243,54 +243,15 @@ shared_ptr<nfd::face::Face> UdpFactory::createInterfaceFace(short localEndpointP
   if (face)
     return face;
 
-  // checking if the local endpoint is already in use for a unicast channel
-  /*auto unicastCh = findChannel(localEndpoint);
-  if (unicastCh) {
-    BOOST_THROW_EXCEPTION(Error("Cannot create the requested UDP interface face, local "
-                                "endpoint is already allocated for a UDP unicast channel"));
-  }
-
-  if (m_prohibitedEndpoints.find(localEndpoint) != m_prohibitedEndpoints.end()) {
-    BOOST_THROW_EXCEPTION(Error("Cannot create the requested UDP interface face, "
-                                "local endpoint is owned by this NFD instance"));
-  }
-
-  if (localEndpoint.address().is_multicast()) {
-    BOOST_THROW_EXCEPTION(Error("createInterfaceFace is only for unicast channels. The provided local "
-                                "endpoint is multicast. Use createMulticastFace to create a multicast face"));
-  }
-
-  if (remoteEndpoint.address().is_multicast()) {
-    BOOST_THROW_EXCEPTION(Error("createInterfaceFace is only for unicast channels. The provided remote "
-                                "endpoint is multicast. Use createMulticastFace to create a multicast face"));
-  }*/
-
-  /*if (localEndpoint.address().is_v6() || remoteEndpoint.address().is_v6()) {
-    BOOST_THROW_EXCEPTION(Error("IPv6 multicast is not supported yet. Please provide an IPv4 "
-                                "address"));
-  }*/
-
-  /*if (localEndpoint.port() != remoteEndpoint.port()) {
-    BOOST_THROW_EXCEPTION(Error("Cannot create the requested UDP multicast face, "
-                                "both endpoints should have the same port number. "));
-  }*/ // TODO Why?
-
-  /*ip::udp::socket socket(getGlobalIoService(), remoteEndpoint.protocol());
-  socket.set_option(ip::udp::socket::reuse_address(true));
-  NFD_LOG_TRACE("Local endpoint bind " << localEndpoint.address().to_string());
-  socket.bind(localEndpoint);
-  socket.connect(remoteEndpoint);*/
+  // TODO How we handle local address already in use?
 
   auto linkService = make_unique<face::GenericLinkService>();
-  //TODO mio auto
-  unique_ptr<face::UnicastUdpTransport> transport =
-      make_unique<face::UnicastUdpTransport>(localEndpointPort, remoteEndpoint, ni);
+  auto transport = make_unique<face::UnicastUdpTransport>(localEndpointPort, remoteEndpoint, ni);
   face = make_shared<Face>(std::move(linkService), std::move(transport));
 
   auto& faces = m_interfaceFaces[ni->getName()];
   faces[remoteEndpoint] = face;
-  connectFaceClosedSignal(*face, [this, ni] { m_interfaceFaces.erase(ni->getName()); });
-  //prohibitEndpoint(localEndpoint); //TODO check
+  connectFaceClosedSignal(*face, [this, ni, remoteEndpoint] { m_interfaceFaces[ni->getName()].erase(remoteEndpoint); });
 
   return face;
 }
