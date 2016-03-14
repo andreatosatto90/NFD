@@ -73,7 +73,7 @@ public:
                   const boost::system::error_code& error);
 
 protected:
-  void
+  bool
   rebindSocket(typename protocol::endpoint localEndpoint);
 
   virtual void
@@ -204,7 +204,7 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
 }
 
 template<class T, class U>
-void
+bool
 DatagramTransport<T, U>::rebindSocket(typename protocol::endpoint localEndpoint)
 
 {
@@ -228,10 +228,15 @@ DatagramTransport<T, U>::rebindSocket(typename protocol::endpoint localEndpoint)
                                      boost::asio::placeholders::error,
                                      boost::asio::placeholders::bytes_transferred));
   }
-  catch (const std::exception& e) {
+  catch (const boost::system::system_error& e) {
     NFD_LOG_FACE_ERROR("Error recreating socket for interface face from " << localEndpoint
                        << " to " << m_remoteEndpoint << ": " << e.what());
+    //if (e.code() == boost::system::errc::network_unreachable) {
+    return false; // TODO better error handling
+    //}
   }
+
+  return true;
 
 }
 

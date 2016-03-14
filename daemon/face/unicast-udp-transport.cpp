@@ -56,6 +56,7 @@ UnicastUdpTransport::UnicastUdpTransport(protocol::socket&& socket,
   this->setLinkType(ndn::nfd::LINK_TYPE_POINT_TO_POINT);
   this->setMtu(udp::computeMtu(m_socket.local_endpoint()));
 
+
   m_hasAddress =true;
 
   NFD_LOG_FACE_INFO("Creating transport");
@@ -92,7 +93,7 @@ UnicastUdpTransport::UnicastUdpTransport(protocol::socket&& socket,
 UnicastUdpTransport::UnicastUdpTransport(short localEndpointPort,
                                          udp::Endpoint remoteEndpoint,
                                          const shared_ptr<ndn::util::NetworkInterface>& ni)
-  : DatagramTransport(remoteEndpoint) // TODO what if we don't want to specify a socket?
+  : DatagramTransport(remoteEndpoint)
   , m_networkInterface(ni)
   , m_hasAddress(false)
   , m_localEndpointPort(localEndpointPort)
@@ -108,8 +109,7 @@ UnicastUdpTransport::UnicastUdpTransport(short localEndpointPort,
   this->setPersistency(ndn::nfd::FacePersistency::FACE_PERSISTENCY_PERMANENT);
   this->setLinkType(ndn::nfd::LINK_TYPE_POINT_TO_POINT);
   this->setMtu(ni->getMtu());
-
-  NFD_LOG_FACE_INFO("Creating transport");
+  this->changeStateFromInterface(ni->getState());
 
   m_networkInterface->onStateChanged.connect(bind(&UnicastUdpTransport::changeStateFromInterface, this, _2));
   m_networkInterface->onAddressAdded.connect(bind(&UnicastUdpTransport::handleAddressAdded, this, _1));
@@ -137,8 +137,10 @@ UnicastUdpTransport::changeStateFromInterface(ndn::util::NetworkInterfaceState s
   if (getState() != TransportState::CLOSING && getState() != TransportState::CLOSED) {
     switch (state) {
       case ndn::util::NetworkInterfaceState::RUNNING:
-        NFD_LOG_FACE_DEBUG("Changing state UP");
-        setState(TransportState::UP);
+        if (m_hasAddress) { // TODO only for test
+          NFD_LOG_FACE_DEBUG("Changing state UP");
+          setState(TransportState::UP);
+        }
         break;
       default:
         NFD_LOG_FACE_DEBUG("Changing state DOWN");
@@ -200,42 +202,77 @@ void UnicastUdpTransport::changeSocketLocalAddress()
   boost::asio::ip::address address;
   if (!isTransportV6) {
     for (const boost::asio::ip::address_v4& addr : m_networkInterface->getIpv4Addresses()) {
-      if(!addr.is_loopback() && !addr.is_multicast())
+      if (!addr.is_loopback() && !addr.is_multicast()) {
         address = addr;
+        // TODO use the same function for IPv4 and IPv6
+        if (!address.is_unspecified() && !address.is_loopback()) {
+          NFD_LOG_FACE_INFO("Changing local address to " << address);
+          m_hasAddress = rebindSocket(udp::Endpoint(address, m_localEndpointPort));
+
+      #ifdef __linux__
+          //
+          // By default, Linux does path MTU discovery on IPv4 sockets,
+          // and sets the DF (Don't Fragment) flag on datagrams smaller
+          // than the interface MTU. However this does not work for us,
+          // because we cannot properly respond to ICMP "packet too big"
+          // messages by fragmenting the packet at the application level,
+          // since we want to rely on IP for fragmentation and reassembly.
+          //
+          // Therefore, we disable PMTU discovery, which prevents the kernel
+          // from setting the DF flag on outgoing datagrams, and thus allows
+          // routers along the path to perform fragmentation as needed.
+          //
+          const int value = IP_PMTUDISC_DONT;
+          if (::setsockopt(m_socket.native_handle(), IPPROTO_IP,
+                           IP_MTU_DISCOVER, &value, sizeof(value)) < 0) {
+            NFD_LOG_FACE_WARN("Failed to disable path MTU discovery: " << std::strerror(errno));
+          }
+      #endif
+
+          if (m_hasAddress)
+            break;
+        }
+
+      }
     }
   }
   else {
     for (const boost::asio::ip::address_v6& addr : m_networkInterface->getIpv6Addresses()) {
-      if(!addr.is_loopback() && !addr.is_multicast() && !addr.is_multicast_link_local())
-        address = addr;
+      if (!addr.is_loopback() && !addr.is_multicast() && !addr.is_multicast_link_local()) {
+        NFD_LOG_FACE_INFO("Changing local address to " << address);
+        m_hasAddress = rebindSocket(udp::Endpoint(address, m_localEndpointPort));
+
+    #ifdef __linux__
+        //
+        // By default, Linux does path MTU discovery on IPv4 sockets,
+        // and sets the DF (Don't Fragment) flag on datagrams smaller
+        // than the interface MTU. However this does not work for us,
+        // because we cannot properly respond to ICMP "packet too big"
+        // messages by fragmenting the packet at the application level,
+        // since we want to rely on IP for fragmentation and reassembly.
+        //
+        // Therefore, we disable PMTU discovery, which prevents the kernel
+        // from setting the DF flag on outgoing datagrams, and thus allows
+        // routers along the path to perform fragmentation as needed.
+        //
+        const int value = IP_PMTUDISC_DONT;
+        if (::setsockopt(m_socket.native_handle(), IPPROTO_IP,
+                         IP_MTU_DISCOVER, &value, sizeof(value)) < 0) {
+          NFD_LOG_FACE_WARN("Failed to disable path MTU discovery: " << std::strerror(errno));
+        }
+    #endif
+
+        if (m_hasAddress)
+          break;
+      }
     }
   }
 
-  if (!address.is_unspecified() && !address.is_loopback()) {
-    NFD_LOG_FACE_INFO("Changing local address to " << address);
-    rebindSocket(udp::Endpoint(address, m_localEndpointPort));
-    m_hasAddress = true;
-
-#ifdef __linux__
-    //
-    // By default, Linux does path MTU discovery on IPv4 sockets,
-    // and sets the DF (Don't Fragment) flag on datagrams smaller
-    // than the interface MTU. However this does not work for us,
-    // because we cannot properly respond to ICMP "packet too big"
-    // messages by fragmenting the packet at the application level,
-    // since we want to rely on IP for fragmentation and reassembly.
-    //
-    // Therefore, we disable PMTU discovery, which prevents the kernel
-    // from setting the DF flag on outgoing datagrams, and thus allows
-    // routers along the path to perform fragmentation as needed.
-    //
-    const int value = IP_PMTUDISC_DONT;
-    if (::setsockopt(m_socket.native_handle(), IPPROTO_IP,
-                     IP_MTU_DISCOVER, &value, sizeof(value)) < 0) {
-      NFD_LOG_FACE_WARN("Failed to disable path MTU discovery: " << std::strerror(errno));
-    }
-#endif
-  }
+  // TODO only for test
+  if (!m_hasAddress)
+    changeStateFromInterface(ndn::util::NetworkInterfaceState::DOWN);
+  else
+    changeStateFromInterface(m_networkInterface->getState());
 }
 
 } // namespace face
