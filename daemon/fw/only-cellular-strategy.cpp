@@ -40,6 +40,7 @@ OnlyCellularStrategy::OnlyCellularStrategy(Forwarder& forwarder, const Name& nam
   // Set weight 1 to preferred interface, 0 to the other
   m_interfacesInfo.insert(std::make_pair("eth0",InterfaceInfo("eth0", 1)));
   m_interfacesInfo.insert(std::make_pair("wlan0",InterfaceInfo("wlan0", 0)));
+  m_interfacesInfo.insert(std::make_pair("wlp4s0",InterfaceInfo("wlp4s0", 0)));
 }
 
 OnlyCellularStrategy::~OnlyCellularStrategy()
