@@ -28,6 +28,7 @@
 
 #include "transport.hpp"
 #include "core/global-io.hpp"
+#include "face-tracepoint.hpp"
 
 #include <array>
 
@@ -204,6 +205,13 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
 
   NFD_LOG_FACE_TRACE("Received: " << nBytesReceived << " bytes");
 
+  // TODO better conversion
+  std::ostringstream local;
+  local << m_localEndpoint;
+  std::ostringstream remote;
+  remote << m_remoteEndpoint;
+  tracepoint(faceLog, packet_received, local.str().c_str(), remote.str().c_str(), nBytesReceived);
+
   bool isOk = false;
   Block element;
   std::tie(isOk, element) = Block::fromBuffer(buffer, nBytesReceived);
@@ -321,6 +329,13 @@ DatagramTransport<T, U>::handleSend(const boost::system::error_code& error,
     return processErrorCode(error);
 
   NFD_LOG_FACE_TRACE("Successfully sent: " << nBytesSent << " bytes");
+
+  // TODO better conversion
+  std::ostringstream local;
+  local << m_localEndpoint;
+  std::ostringstream remote;
+  remote << m_remoteEndpoint;
+  tracepoint(faceLog, packet_sent, local.str().c_str(), remote.str().c_str(), nBytesSent);
 }
 
 template<class T, class U>
