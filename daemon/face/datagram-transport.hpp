@@ -76,14 +76,17 @@ protected:
   bool
   rebindSocket(typename protocol::endpoint localEndpoint);
 
-  bool
-  connectSocket();
+  /*bool
+  connectSocket();*/
 
   virtual void
   doClose() DECL_OVERRIDE;
 
   virtual void
   doSend(Transport::Packet&& packet) DECL_OVERRIDE;
+
+  void
+  handleConnect(const boost::system::error_code& error);
 
   void
   handleSend(const boost::system::error_code& error,
@@ -117,14 +120,14 @@ private:
   bool m_hasBeenUsedRecently;
   typename protocol::endpoint m_remoteEndpoint;
   typename protocol::endpoint m_localEndpoint;
-  bool m_needConnection;
+  bool m_isConnected;
 };
 
 
 template<class T, class U>
 DatagramTransport<T, U>::DatagramTransport(typename DatagramTransport::protocol::socket&& socket)
   : m_socket(std::move(socket))
-  , m_hasBeenUsedRecently(false)
+  , m_hasBeenUsedRecently(false) // TODO add remote endpoint
 {
   m_socket.async_receive_from(boost::asio::buffer(m_receiveBuffer), m_sender,
                               bind(&DatagramTransport<T, U>::handleReceive, this,
@@ -136,11 +139,11 @@ DatagramTransport<T, U>::DatagramTransport(typename DatagramTransport::protocol:
 
 template<class T, class U>
 DatagramTransport<T, U>::DatagramTransport(typename protocol::endpoint remoteEndpoint)
-  : m_socket(getGlobalIoService(), remoteEndpoint.protocol()) // TODO without protocol we have a bad file descriptor error
+  : m_socket(getGlobalIoService(), remoteEndpoint.protocol())
   , m_hasBeenUsedRecently(false)
   , m_remoteEndpoint(remoteEndpoint)
 {
-  m_needConnection = true;
+  m_isConnected = false;
 }
 
 template<class T, class U>
@@ -170,7 +173,6 @@ DatagramTransport<T, U>::doSend(Transport::Packet&& packet)
 {
   NFD_LOG_FACE_TRACE(__func__);
 
-
 //  if (!m_socket.is_open()) {
 //    // Rebind socket
 //    typename protocol::endpoint defaultEndpoint; // TODO not good
@@ -178,10 +180,12 @@ DatagramTransport<T, U>::doSend(Transport::Packet&& packet)
 //      rebindSocket(m_localEndpoint);
 //  }
 
-  if (m_socket.is_open() && m_needConnection)
-    connectSocket();
-
   if (m_socket.is_open()) {
+
+    if (!m_isConnected)
+      m_socket.async_connect(m_remoteEndpoint, bind(&DatagramTransport<T, U>::handleConnect, this,
+                                                    boost::asio::placeholders::error));
+
     m_socket.async_send(boost::asio::buffer(packet.packet),
                         bind(&DatagramTransport<T, U>::handleSend, this,
                              boost::asio::placeholders::error,
@@ -225,8 +229,8 @@ bool
 DatagramTransport<T, U>::rebindSocket(typename protocol::endpoint localEndpoint)
 
 {
-  m_localEndpoint = localEndpoint; // We need this to retry the socket connection
-  std::cerr << "***** rebinding" << std::endl;
+  m_localEndpoint = localEndpoint; // TODO We need this to retry the socket binding (is it useful?)
+
   if (m_socket.is_open()) {
     // Cancel all outstanding operations and close the socket.
     // Use the non-throwing variants and ignore errors, if any.
@@ -237,6 +241,7 @@ DatagramTransport<T, U>::rebindSocket(typename protocol::endpoint localEndpoint)
 
   m_socket = ip::udp::socket(getGlobalIoService(), m_localEndpoint.protocol());
   m_socket.set_option(ip::udp::socket::reuse_address(true));
+  m_isConnected = false;
 
   try {
     m_socket.bind(m_localEndpoint);
@@ -247,12 +252,12 @@ DatagramTransport<T, U>::rebindSocket(typename protocol::endpoint localEndpoint)
    // return false; // TODO Uncomment to have a new local address if possible
   }
 
-
-  m_needConnection = true;
-  return connectSocket();
+  m_socket.async_connect(m_remoteEndpoint, bind(&DatagramTransport<T, U>::handleConnect, this,
+                                                boost::asio::placeholders::error));
+  return true;
 }
 
-template<class T, class U>
+/*template<class T, class U>
 bool
 DatagramTransport<T, U>::connectSocket()
 {
@@ -263,16 +268,33 @@ DatagramTransport<T, U>::connectSocket()
                                 bind(&DatagramTransport<T, U>::handleReceive, this,
                                      boost::asio::placeholders::error,
                                      boost::asio::placeholders::bytes_transferred));
-
-    m_needConnection = false;
   }
   catch (const boost::system::system_error& e) {
-    m_needConnection = true;
     NFD_LOG_FACE_ERROR("Error connecting socket for interface face from " << m_localEndpoint
                        << " to " << m_remoteEndpoint << ": " << e.what());
+    return false;
   }
 
   return true;
+}*/
+
+template<class T, class U>
+void
+DatagramTransport<T, U>::handleConnect(const boost::system::error_code& error)
+{
+  if (error) {
+    NFD_LOG_FACE_ERROR("Error connecting socket for interface face from " << m_localEndpoint
+                       << " to " << m_remoteEndpoint << ": " << error.message());
+    m_isConnected = false;
+    return;
+  }
+
+  m_isConnected = true;
+
+  m_socket.async_receive_from(boost::asio::buffer(m_receiveBuffer), m_sender,
+                              bind(&DatagramTransport<T, U>::handleReceive, this,
+                                   boost::asio::placeholders::error,
+                                   boost::asio::placeholders::bytes_transferred));
 }
 
 template<class T, class U>
