@@ -28,6 +28,9 @@
 
 #include "strategy.hpp"
 
+#include <ndn-cxx/util/scheduler.hpp>
+#include <ndn-cxx/util/network-interface.hpp>
+
 namespace nfd {
 namespace fw {
 
@@ -49,6 +52,27 @@ public:
   beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
                         const Face& inFace, const Data& data) DECL_OVERRIDE;
 
+public:
+
+  class PendingInterest
+  {
+  public:
+    PendingInterest(const std::string& interfaceName, const Face& inFace, const Interest& interest,
+                    shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry)
+      : interfaceName(interfaceName)
+      , inFace(&inFace)
+      , interest(&interest)
+      , fibEntry(fibEntry)
+      , pitEntry(pitEntry) {}
+
+
+    std::string interfaceName;
+    const Face* inFace; // TODO Deallocation problem
+    const Interest* interest; // TODO Deallocation problem
+    shared_ptr<fib::Entry> fibEntry;
+    shared_ptr<pit::Entry> pitEntry;
+  };
+
 protected:
   class InterfaceInfo
   {
@@ -62,13 +86,24 @@ protected:
   };
 
   typedef std::unordered_map<std::string, InterfaceInfo> interfacesInfos;
+  typedef std::vector<PendingInterest> pendingInterests;
 
-  int getFaceWeight(const shared_ptr<nfd::face::Face>& face) const;
+  int
+  getFaceWeight(const shared_ptr<nfd::face::Face>& face) const;
+
+  void
+  handleInterfaceStateChanged(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                              ndn::util::NetworkInterfaceState oldState,
+                              ndn::util::NetworkInterfaceState newState);
 
 protected:
+  ndn::util::Scheduler m_scheduler;
+
   const Name& m_name;
   interfacesInfos m_interfacesInfo;
+  std::unordered_map<std::string/*interfaceName*/,pendingInterests> m_interfaceInterests;
   std::mt19937 m_randomGen;
+
 };
 
 } // namespace fw

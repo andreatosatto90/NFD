@@ -26,6 +26,7 @@
 #include "weighted-random-strategy.hpp"
 #include "core/logger.hpp"
 #include "strategies-tracepoint.hpp"
+#include "core/global-io.hpp"
 
 
 namespace nfd {
@@ -35,6 +36,7 @@ NFD_LOG_INIT("WeightedRandomStrategy");
 
 WeightedRandomStrategy::WeightedRandomStrategy(Forwarder& forwarder, const Name& name)
   : Strategy(forwarder, name)
+  , m_scheduler(getGlobalIoService())
   , m_name(name)
 {
   std::random_device rd;
@@ -86,7 +88,7 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
 //  }
   float totalWeight = 0;
   const fib::NextHopList& nexthops = fibEntry->getNextHops();
-  std::map<int,shared_ptr<Face>> eligibleFaces;
+  std::map<int, shared_ptr<Face>> eligibleFaces;
   for (const fib::NextHop& nextHop : nexthops) {
     if (predicate_NextHop_eligible(pitEntry, nextHop, inFace.getId(), true, time::steady_clock::now())) {
       shared_ptr<Face> outFace = nextHop.getFace();
@@ -114,6 +116,9 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
       shared_ptr<Face> outFace = it->second;
       NFD_LOG_TRACE("Interest to face: " << outFace->getId());
       this->sendInterest(pitEntry, outFace);
+
+      auto interestList = m_interfaceInterests.insert({outFace->getInterfaceName(), pendingInterests()}).first;
+      interestList->second.push_back(PendingInterest(outFace->getInterfaceName(), inFace, interest, fibEntry, pitEntry));
       return;
     }
   }
@@ -134,6 +139,37 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
   if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
     tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
                inFace.getId(), inFace.getInterfaceName().c_str());
+
+  NFD_LOG_TRACE("Satisfied interest, vector size I: " << m_interfaceInterests.size());
+
+  for (auto el : m_interfaceInterests) {
+    for (auto pi = el.second.begin(); pi != el.second.end(); ) {
+        if (pi->pitEntry == pitEntry) {
+          pi = el.second.erase(pi);
+        }
+        else
+          ++pi;
+      }
+  }
+
+  NFD_LOG_TRACE("Satisfied interest, vector size D: " << m_interfaceInterests.size());
+}
+
+void
+WeightedRandomStrategy::handleInterfaceStateChanged(const shared_ptr<ndn::util::NetworkInterface>& ni,
+                                                    ndn::util::NetworkInterfaceState oldState,
+                                                    ndn::util::NetworkInterfaceState newState)
+{
+
+  if (newState == ndn::util::NetworkInterfaceState::RUNNING) {
+    auto list = m_interfaceInterests.find(ni->getName());
+    if (list != m_interfaceInterests.end()) {
+      for (PendingInterest& el : list->second) {
+        NFD_LOG_TRACE("Resend interest" << m_interfaceInterests.size());
+        afterReceiveInterest(*el.inFace, *el.interest, el.fibEntry, el.pitEntry);
+      }
+    }
+  }
 }
 
 int
