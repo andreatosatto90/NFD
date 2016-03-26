@@ -127,7 +127,7 @@ public: // InRecord
   insertOrUpdateInRecord(shared_ptr<Face> face, const Interest& interest);
 
   /** \brief get the InRecord for face
-   *  \return an iterator to the InRecord, or .end if it does not exist
+   *  \return an iterator to the InRecord, or .end if it does not exist.get()
    */
   InRecordCollection::const_iterator
   getInRecord(const Face& face) const;

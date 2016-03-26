@@ -28,6 +28,8 @@
 #include "strategies-tracepoint.hpp"
 #include "core/global-io.hpp"
 
+#include <thread> //TODO test only
+
 
 namespace nfd {
 namespace fw {
@@ -119,6 +121,8 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
 
       auto interestList = m_interfaceInterests.insert({outFace->getInterfaceName(), pendingInterests()}).first;
       interestList->second.push_back(PendingInterest(outFace->getInterfaceName(), inFace, interest, fibEntry, pitEntry));
+
+      //NFD_LOG_TRACE("Size insert I: " << m_interfaceInterests[outFace->getInterfaceName()].size());
       return;
     }
   }
@@ -126,6 +130,8 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
     NFD_LOG_TRACE("No eligible faces");
 
   NFD_LOG_TRACE("Interest rejected");
+
+  //std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   this->rejectPendingInterest(pitEntry);
   return;
@@ -136,23 +142,28 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
                                               const nfd::face::Face& inFace,
                                               const ndn::Data& data)
 {
-  if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
-    tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
-               inFace.getId(), inFace.getInterfaceName().c_str());
-
-  NFD_LOG_TRACE("Satisfied interest, vector size I: " << m_interfaceInterests.size());
-
-  for (auto el : m_interfaceInterests) {
-    for (auto pi = el.second.begin(); pi != el.second.end(); ) {
-        if (pi->pitEntry == pitEntry) {
-          pi = el.second.erase(pi);
-        }
-        else
-          ++pi;
-      }
+  time::milliseconds rtt = time::milliseconds(-1);
+  pit::OutRecordCollection::const_iterator outRecord = pitEntry->getOutRecord(inFace);
+  if (outRecord == pitEntry->getOutRecords().end()) { // no OutRecord
+    /*NFD_LOG_TRACE(pitEntry->getInterest() << " dataFrom " << inFace.getId() <<
+                  " no-out-record");*/
+  }
+  else {
+    rtt = time::duration_cast<time::milliseconds> (time::steady_clock::now() - outRecord->getLastRenewed());
+    NFD_LOG_TRACE("Rtt: " << rtt.count());
   }
 
-  NFD_LOG_TRACE("Satisfied interest, vector size D: " << m_interfaceInterests.size());
+  if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
+    tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
+               inFace.getId(), inFace.getInterfaceName().c_str(), rtt.count());
+
+  for (auto& el : m_interfaceInterests) {
+    el.second.erase(std::remove_if(el.second.begin(), el.second.end(),
+                      [&](const PendingInterest& pi) {
+                      return ((pi.pitEntry.get() == pitEntry.get()) || pi.pitEntry->hasUnexpiredOutRecords() == false) ? true : false;
+                      })
+                   ,el.second.end());
+  }
 }
 
 void
@@ -160,7 +171,6 @@ WeightedRandomStrategy::handleInterfaceStateChanged(const shared_ptr<ndn::util::
                                                     ndn::util::NetworkInterfaceState oldState,
                                                     ndn::util::NetworkInterfaceState newState)
 {
-
   if (newState == ndn::util::NetworkInterfaceState::RUNNING) {
     auto list = m_interfaceInterests.find(ni->getName());
     if (list != m_interfaceInterests.end()) {

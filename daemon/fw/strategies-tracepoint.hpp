@@ -34,13 +34,15 @@ TRACEPOINT_EVENT(
     const char*, strategyName,
     const char*, interest,
     int, faceId,
-    const char*, interfaceName
+    const char*, interfaceName,
+    int, rtt
   ),
   TP_FIELDS(
     ctf_string(strategy_name, strategyName)
     ctf_string(interest_name, interest)
     ctf_integer(int, face_id, faceId)
     ctf_string(interface_name, interfaceName)
+    ctf_integer(int, rtt, rtt)
   )
 )
 
