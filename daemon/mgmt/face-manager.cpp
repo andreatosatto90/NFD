@@ -1058,10 +1058,11 @@ void FaceManager::handleInterfaceAddressAdded(const shared_ptr<ndn::util::Networ
     m_factories.insert(std::make_pair("udp", factoryUdp));
   }
 
+
   if (address.is_v4() && m_udpConfig.enableV4) {
     if (ni->isUp() && !ni->isLoopback()) {
       shared_ptr<UdpChannel> v4Channel =
-          factoryUdp->createChannel(udp::Endpoint(address, m_udpConfig.port),
+          factoryUdp->createChannel(udp::Endpoint(boost::asio::ip::udp::v4(), m_udpConfig.port),
                                     ni, time::seconds(m_udpConfig.timeout));
 
       v4Channel->listen(bind(&FaceTable::add, &m_faceTable, _1), nullptr);
