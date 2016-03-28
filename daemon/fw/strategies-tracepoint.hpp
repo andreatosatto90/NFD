@@ -35,7 +35,8 @@ TRACEPOINT_EVENT(
     const char*, interest,
     int, faceId,
     const char*, interfaceName,
-    int, rtt
+    int, rtt,
+    int, meanRtt
   ),
   TP_FIELDS(
     ctf_string(strategy_name, strategyName)
@@ -43,6 +44,7 @@ TRACEPOINT_EVENT(
     ctf_integer(int, face_id, faceId)
     ctf_string(interface_name, interfaceName)
     ctf_integer(int, rtt, rtt)
+    ctf_integer(int, mean_rtt, meanRtt)
   )
 )
 

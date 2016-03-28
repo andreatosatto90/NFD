@@ -44,7 +44,8 @@ PreferredWlanStrategy::PreferredWlanStrategy(Forwarder& forwarder, const Name& n
 
   // Set weight 1 to preferred interface, 0 to the other
   m_interfacesInfo.insert(std::make_pair("eth0",InterfaceInfo("eth0", 0)));
-  m_interfacesInfo.insert(std::make_pair("enp2s0",InterfaceInfo("enp2s0", 0)));
+  //m_interfacesInfo.insert(std::make_pair("enp2s0",InterfaceInfo("enp2s0", 0)));
+  m_interfacesInfo.insert(std::make_pair("wwan0",InterfaceInfo("wwan0", 0)));
   m_interfacesInfo.insert(std::make_pair("wlan0",InterfaceInfo("wlan0", 1)));
   m_interfacesInfo.insert(std::make_pair("wlp4s0",InterfaceInfo("wlp4s0", 1)));
 }
@@ -140,7 +141,7 @@ PreferredWlanStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
 {
   if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
     tracepoint(strategyLog, data_received, STRATEGY_NAME.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
-               inFace.getId(), inFace.getInterfaceName().c_str(), -1);
+               inFace.getId(), inFace.getInterfaceName().c_str(), -1, -1);
 }
 
 int

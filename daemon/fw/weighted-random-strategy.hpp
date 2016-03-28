@@ -57,20 +57,25 @@ public:
   class PendingInterest
   {
   public:
-    PendingInterest(const std::string& interfaceName, const Face& inFace, const Interest& interest,
-                    shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry)
+    PendingInterest(const std::string& interfaceName, shared_ptr<Face> outFace, const Interest& interest,
+                    shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry,
+                    time::steady_clock::TimePoint lastSent, shared_ptr<ndn::util::scheduler::EventId> retryEvent)
       : interfaceName(interfaceName)
-      , inFace(&inFace)
+      , outFace(outFace)
       , interest(&interest)
       , fibEntry(fibEntry)
-      , pitEntry(pitEntry) {}
+      , pitEntry(pitEntry)
+      , lastSent(lastSent)
+      , retryEvent(retryEvent){}
 
 
     std::string interfaceName;
-    const Face* inFace; // TODO Deallocation problem
+    shared_ptr<Face> outFace;
     const Interest* interest; // TODO Deallocation problem
     shared_ptr<fib::Entry> fibEntry;
     shared_ptr<pit::Entry> pitEntry;
+    time::steady_clock::TimePoint lastSent;
+    shared_ptr<ndn::util::scheduler::EventId> retryEvent;
   };
 
 protected:
@@ -86,15 +91,37 @@ protected:
   };
 
   typedef std::unordered_map<std::string, InterfaceInfo> interfacesInfos;
-  typedef std::vector<PendingInterest> pendingInterests;
+  typedef std::vector<shared_ptr<PendingInterest>> pendingInterests;
 
   int
   getFaceWeight(const shared_ptr<nfd::face::Face>& face) const;
 
   void
-  handleInterfaceStateChanged(const shared_ptr<ndn::util::NetworkInterface>& ni,
+  handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterface>& ni,
                               ndn::util::NetworkInterfaceState oldState,
                               ndn::util::NetworkInterfaceState newState);
+
+  void
+  resendPendingInterest();
+
+  void
+  resendPendingInterestRetry();
+
+  void
+  retryInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr<Face> outFace,
+                time::steady_clock::TimePoint sentTime, shared_ptr<PendingInterest> pi, bool now = false);
+
+  void
+  handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni);
+
+  void
+  handleInterfaceRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni);
+
+  float
+  addRttMeasurement(float rtt);
+
+  float
+  getSendTimeout();
 
 protected:
   ndn::util::Scheduler m_scheduler;
@@ -103,6 +130,23 @@ protected:
   interfacesInfos m_interfacesInfo;
   std::unordered_map<std::string/*interfaceName*/,pendingInterests> m_interfaceInterests;
   std::mt19937 m_randomGen;
+
+  bool m_errorState;
+  shared_ptr<ndn::util::NetworkInterface> m_runningInterface;
+  shared_ptr<Face> lastFace;
+
+  shared_ptr<ndn::util::scheduler::EventId> retryEvent;
+
+  // Rtt
+  float m_rttMean;
+  float m_rtt0;
+  float m_rttMulti;
+  float m_rttMax;
+  float m_lastRtt;
+
+  int m_nRttMean;
+  std::vector<float> m_oldRtt;
+  std::pair<float /*old*/, float /*new*/> rttMeanWeight;
 
 };
 
