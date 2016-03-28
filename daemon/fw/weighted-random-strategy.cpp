@@ -291,14 +291,14 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
   if (pi->retryEvent != nullptr) {
     pi->retryEvent = nullptr;
     if (now) {
-      NFD_LOG_DEBUG("Resend single interest NOW" << pitEntry->getName());
+      NFD_LOG_TRACE("Resend single interest NOW" << pitEntry->getName());
       this->sendInterest(pitEntry, outFace, true);
       pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
     }
     else {
       //time::milliseconds timeoutTime(time::duration_cast<time::milliseconds>(time::steady_clock::now() - sentTime).count());
       //if (timeoutTime.count() > getSendTimeout()) {
-        NFD_LOG_DEBUG("Resend single interest defer " << pitEntry->getName());
+        NFD_LOG_TRACE("Resend single interest defer " << pitEntry->getName());
         this->sendInterest(pitEntry, outFace, false);
         pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
       //}
