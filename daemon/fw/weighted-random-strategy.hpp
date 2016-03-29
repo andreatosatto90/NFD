@@ -142,6 +142,7 @@ protected:
   float m_rtt0;
   float m_rttMulti;
   float m_rttMax;
+  float m_rttMin;
   float m_lastRtt;
 
   int m_nRttMean;

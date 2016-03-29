@@ -55,8 +55,9 @@ WeightedRandomStrategy::WeightedRandomStrategy(Forwarder& forwarder, const Name&
   m_rttMean = -1;
   m_lastRtt = -1;
   m_rttMulti = 2;
+  m_rttMin = 10;
   m_rttMax = 1000;
-  m_rtt0 = 700;
+  m_rtt0 = 500;
 
   m_nRttMean = 5;
 
@@ -299,7 +300,7 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
       //time::milliseconds timeoutTime(time::duration_cast<time::milliseconds>(time::steady_clock::now() - sentTime).count());
       //if (timeoutTime.count() > getSendTimeout()) {
         NFD_LOG_TRACE("Resend single interest defer " << pitEntry->getName());
-        this->sendInterest(pitEntry, outFace, false);
+        this->sendInterest(pitEntry, outFace, true);
         pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
       //}
       //else {
@@ -349,6 +350,8 @@ WeightedRandomStrategy::handleInterfaceRemoved(const shared_ptr<ndn::util::Netwo
 float
 WeightedRandomStrategy::addRttMeasurement(float rtt)
 {
+  /*if (rtt < m_rttMin)
+    rtt = m_rttMin;*/
   /*if (m_oldRtt.size() > m_nRttMean) {
     m_oldRtt.erase(m_oldRtt.begin());
   }
