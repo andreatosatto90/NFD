@@ -171,11 +171,19 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
   //interestList->second.push_back(PendingInterest(lastFace->getInterfaceName(), lastFace, interest, fibEntry, pitEntry));
   //this->rejectPendingInterest(pitEntry);
 
-  auto interestList = m_interfaceInterests.insert({lastFace->getInterfaceName(), pendingInterests()}).first;
+  if ( lastFace != nullptr) {
+    auto interestList = m_interfaceInterests.insert({lastFace->getInterfaceName(), pendingInterests()}).first;
 
-  auto pi = make_shared<PendingInterest>(PendingInterest(lastFace->getInterfaceName(), lastFace, interest, fibEntry, pitEntry, time::steady_clock::now(), nullptr));
-  interestList->second.push_back(pi);
-  pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, lastFace, time::steady_clock::now(), pi, false)));
+    auto pi = make_shared<PendingInterest>(PendingInterest(lastFace->getInterfaceName(), lastFace, interest, fibEntry, pitEntry, time::steady_clock::now(), nullptr));
+    interestList->second.push_back(pi);
+    pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, lastFace, time::steady_clock::now(), pi, false)));
+    return;
+  }
+
+  lp::NackHeader nackHeader;
+  nackHeader.setReason(lp::NackReason::DUPLICATE);
+  this->sendNack(pitEntry, inFace, nackHeader);
+  this->rejectPendingInterest(pitEntry);
 
 
   return;
