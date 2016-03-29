@@ -57,7 +57,7 @@ WeightedRandomStrategy::WeightedRandomStrategy(Forwarder& forwarder, const Name&
   m_rttMulti = 2;
   m_rttMin = 20;
   m_rttMax = 1000;
-  m_rtt0 = 500;
+  m_rtt0 = 250;
 
   m_nRttMean = 5;
 
@@ -422,7 +422,7 @@ WeightedRandomStrategy::getSendTimeout()
     if (m_lastRtt == -1)
       m_rttMean = m_rtt0;
     else
-      m_rttMean = m_lastRtt;
+      m_rttMean = m_rtt0;
   }
 
   float rtt = m_rttMean * m_rttMulti;
