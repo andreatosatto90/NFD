@@ -48,6 +48,28 @@ TRACEPOINT_EVENT(
   )
 )
 
+TRACEPOINT_EVENT(
+  strategyLog,
+  rtt_min,
+  TP_ARGS(
+    int, val
+  ),
+  TP_FIELDS(
+    ctf_integer(int, rtt_min, val)
+  )
+)
+
+TRACEPOINT_EVENT(
+  strategyLog,
+  rtt_max,
+  TP_ARGS(
+    int, val
+  ),
+  TP_FIELDS(
+    ctf_integer(int, rtt_max, val)
+  )
+)
+
 #endif // NFD_DAEMON_FW_STRATEGIES_TRACEPOINT_HPP
 
 #include <lttng/tracepoint-event.h>

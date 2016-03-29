@@ -57,12 +57,11 @@ public:
   class PendingInterest
   {
   public:
-    PendingInterest(const std::string& interfaceName, shared_ptr<Face> outFace, const Interest& interest,
+    PendingInterest(const std::string& interfaceName, shared_ptr<Face> outFace,
                     shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry,
                     time::steady_clock::TimePoint lastSent, shared_ptr<ndn::util::scheduler::EventId> retryEvent)
       : interfaceName(interfaceName)
       , outFace(outFace)
-      , interest(&interest)
       , fibEntry(fibEntry)
       , pitEntry(pitEntry)
       , lastSent(lastSent)
@@ -71,7 +70,6 @@ public:
 
     std::string interfaceName;
     shared_ptr<Face> outFace;
-    const Interest* interest; // TODO Deallocation problem
     shared_ptr<fib::Entry> fibEntry;
     shared_ptr<pit::Entry> pitEntry;
     time::steady_clock::TimePoint lastSent;
