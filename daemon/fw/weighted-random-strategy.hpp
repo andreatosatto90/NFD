@@ -65,7 +65,8 @@ public:
       , fibEntry(fibEntry)
       , pitEntry(pitEntry)
       , lastSent(lastSent)
-      , retryEvent(retryEvent){}
+      , retryEvent(retryEvent)
+      , invalid(false){}
 
 
     std::string interfaceName;
@@ -73,6 +74,7 @@ public:
     shared_ptr<fib::Entry> fibEntry;
     shared_ptr<pit::Entry> pitEntry;
     time::steady_clock::TimePoint lastSent;
+    bool invalid;
     shared_ptr<ndn::util::scheduler::EventId> retryEvent;
   };
 

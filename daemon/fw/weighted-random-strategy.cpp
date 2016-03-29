@@ -271,6 +271,7 @@ WeightedRandomStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::Networ
         if (pi->retryEvent != nullptr) {
           m_scheduler.cancelEvent(*(pi->retryEvent));
           pi->retryEvent = nullptr;
+          pi->invalid = true;
         }
       }
 
@@ -287,6 +288,10 @@ void WeightedRandomStrategy::resendPendingInterest()
       if (list != m_interfaceInterests.end()) {
         NFD_LOG_TRACE("Resend size " << list->second.size());
         for (shared_ptr<PendingInterest>& pi : list->second) {
+          if (pi->invalid) {
+            pi->lastSent = time::steady_clock::now();
+            pi->invalid = false;
+          }
           //NFD_LOG_DEBUG("Resend interest " << pi->pitEntry->getName());
           if (pi->retryEvent != nullptr) {
             m_scheduler.cancelEvent(*(pi->retryEvent));
