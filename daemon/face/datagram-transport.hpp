@@ -87,6 +87,9 @@ protected:
   doSend(Transport::Packet&& packet) DECL_OVERRIDE;
 
   void
+  doConnect();
+
+  void
   handleConnect(const boost::system::error_code& error);
 
   void
@@ -122,6 +125,7 @@ private:
   typename protocol::endpoint m_remoteEndpoint;
   typename protocol::endpoint m_localEndpoint;
   bool m_isConnected;
+  bool m_inConnection;
 };
 
 
@@ -145,6 +149,7 @@ DatagramTransport<T, U>::DatagramTransport(typename protocol::endpoint remoteEnd
   , m_remoteEndpoint(remoteEndpoint)
 {
   m_isConnected = false;
+  m_inConnection = false;
 }
 
 template<class T, class U>
@@ -183,9 +188,11 @@ DatagramTransport<T, U>::doSend(Transport::Packet&& packet)
 
   if (m_socket.is_open()) {
 
-    if (!m_isConnected)
+    if (!m_isConnected && !m_inConnection) {
+      m_inConnection = true;
       m_socket.async_connect(m_remoteEndpoint, bind(&DatagramTransport<T, U>::handleConnect, this,
                                                     boost::asio::placeholders::error));
+    }
 
     m_socket.async_send(boost::asio::buffer(packet.packet),
                         bind(&DatagramTransport<T, U>::handleSend, this,
@@ -197,13 +204,20 @@ DatagramTransport<T, U>::doSend(Transport::Packet&& packet)
 
 template<class T, class U>
 void
+DatagramTransport<T, U>::doConnect()
+{
+
+}
+
+template<class T, class U>
+void
 DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesReceived,
                                          const boost::system::error_code& error)
 {
   if (error)
     return processErrorCode(error);
 
-  NFD_LOG_FACE_TRACE("Received: " << nBytesReceived << " bytes");
+  NFD_LOG_FACE_TRACE("Received from : "<< m_remoteEndpoint << " -> " << nBytesReceived << " bytes");
 
   // TODO better conversion
   std::ostringstream local;
@@ -221,7 +235,7 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
     return;
   }
   if (element.size() != nBytesReceived) {
-    NFD_LOG_FACE_WARN("Received datagram size and decoded element size don't match");
+    NFD_LOG_FACE_WARN("Received datagram size and decoded element size don't match E: " << element.size() << " R: " <<  nBytesReceived);
     // This packet won't extend the face lifetime
     return;
   }
@@ -290,6 +304,8 @@ template<class T, class U>
 void
 DatagramTransport<T, U>::handleConnect(const boost::system::error_code& error)
 {
+  m_inConnection = false;
+
   if (error) {
     NFD_LOG_FACE_ERROR("Error connecting socket for interface face from " << m_localEndpoint
                        << " to " << m_remoteEndpoint << ": " << error.message());

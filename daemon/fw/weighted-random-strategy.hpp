@@ -74,8 +74,9 @@ public:
     shared_ptr<fib::Entry> fibEntry;
     shared_ptr<pit::Entry> pitEntry;
     time::steady_clock::TimePoint lastSent;
-    bool invalid;
     shared_ptr<ndn::util::scheduler::EventId> retryEvent;
+    shared_ptr<ndn::util::scheduler::EventId> deleteEvent;
+    bool invalid;
   };
 
 protected:
@@ -110,6 +111,9 @@ protected:
   void
   retryInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr<Face> outFace,
                 time::steady_clock::TimePoint sentTime, shared_ptr<PendingInterest> pi, bool now = false);
+
+  void
+  removePendingInterest(shared_ptr<PendingInterest>& pi, shared_ptr<pit::Entry> pitEntry);
 
   void
   handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni);

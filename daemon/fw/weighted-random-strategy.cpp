@@ -54,10 +54,10 @@ WeightedRandomStrategy::WeightedRandomStrategy(Forwarder& forwarder, const Name&
   rttMeanWeight.second = 0.7; // New value
   m_rttMean = -1;
   m_lastRtt = -1;
-  m_rttMulti = 2;
+  m_rttMulti = 1.3;
   m_rttMin = 20;
-  m_rttMax = 1000;
-  m_rtt0 = 250;
+  m_rttMax = 800;
+  m_rtt0 = 150;
 
   m_nRttMean = 5;
 
@@ -146,7 +146,7 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
       auto pi = make_shared<PendingInterest>(PendingInterest(outFace->getInterfaceName(), outFace, fibEntry, pitEntry, time::steady_clock::now(), nullptr));
       interestList->second.push_back(pi);
       pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
-
+      pi->deleteEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime()), bind(&WeightedRandomStrategy::removePendingInterest, this, pi, pitEntry)));
 
       //NFD_LOG_DEBUG("Current pipeline size " << interestList->second.size());
       //
@@ -177,6 +177,7 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
     auto pi = make_shared<PendingInterest>(PendingInterest(lastFace->getInterfaceName(), lastFace, fibEntry, pitEntry, time::steady_clock::now(), nullptr));
     interestList->second.push_back(pi);
     pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, lastFace, time::steady_clock::now(), pi, false)));
+    pi->deleteEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime()), bind(&WeightedRandomStrategy::removePendingInterest, this, pi, pitEntry)));
     return;
   }
 
@@ -211,30 +212,40 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
     }
 
     for (auto& el : m_interfaceInterests) {
-      //NFD_LOG_DEBUG("Current pipeline B " << el.second.size());
+      //NFD_LOG_DEBUG(" Remove pending received " << el.second.size());
       el.second.erase(std::remove_if(el.second.begin(), el.second.end(),
                         [&](shared_ptr<PendingInterest>& pi) {
-
-                            if((pi->pitEntry.get() == pitEntry.get()) || !pi->pitEntry->hasUnexpiredOutRecords() || !pi->pitEntry->hasLocalInRecord()) {
+                            if (pi->pitEntry->getInRecords().size() > 1)
+                              NFD_LOG_DEBUG("DOUBLE");
+                            if((pi->pitEntry.get() == pitEntry.get()) || !pi->pitEntry->hasLocalInRecord()) {
                                 if(pi->pitEntry.get() == pitEntry.get() && !noRtt) {
                                     rtt = time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->lastSent);
                                     addRttMeasurement(rtt.count());
-                                    NFD_LOG_DEBUG("Mean Rtt: " << m_rttMean);
+                                    //NFD_LOG_DEBUG("Mean Rtt: " << m_rttMean);
+                                }
+
+                                if (!pi->pitEntry->hasLocalInRecord()) {
+                                  NFD_LOG_DEBUG("No in faces");
                                 }
 
                                 if (pi->retryEvent != nullptr) {
                                    m_scheduler.cancelEvent(*(pi->retryEvent));
                                    pi->retryEvent = nullptr;
+
+                                }
+                                if (pi->deleteEvent != nullptr) {
+                                  m_scheduler.cancelEvent(*(pi->deleteEvent));
+                                  pi->deleteEvent =nullptr;
                                 }
                                 return true;
                                 //
                             }
                             else {
-                              if (pi->retryEvent == nullptr) {
-                                NFD_LOG_DEBUG("LOST");
+//                              if (pi->retryEvent == nullptr) {
+//                                //NFD_LOG_DEBUG("LOST");
 
-                                }
-                                return false;
+//                              }
+                              return false;
                             }
                         })
                      , el.second.end());
@@ -245,9 +256,9 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
       tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
                  inFace.getId(), inFace.getInterfaceName().c_str(), rtt.count(), m_rttMean);
 
-
+    //data.setTag(make_shared<lp::StrategyNotify>(5));
     if (m_errorState == true) {
-      resendPendingInterest();
+      //resendPendingInterest();
       m_errorState = false;
     }
   }
@@ -339,6 +350,39 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
     }
 
   }
+}
+
+void
+WeightedRandomStrategy::removePendingInterest(shared_ptr<PendingInterest>& pi, shared_ptr<pit::Entry> pitEntry)
+{
+
+
+  for (auto& el : m_interfaceInterests) {
+    NFD_LOG_DEBUG(" Actual size " << el.second.size());
+
+    //el.second.erase(std::remove(el.second.begin(), el.second.end(), pi), el.second.end());
+    el.second.erase(std::remove_if(el.second.begin(), el.second.end(),
+                      [&](shared_ptr<PendingInterest>& piTmp) {
+                          if(piTmp == pi) {
+                              NFD_LOG_DEBUG("Done");
+                              if (pi->retryEvent != nullptr) {
+                                 m_scheduler.cancelEvent(*(pi->retryEvent));
+                                 pi->retryEvent = nullptr;
+
+                              }
+                              if (pi->deleteEvent != nullptr) {
+                                m_scheduler.cancelEvent(*(pi->deleteEvent));
+                                pi->deleteEvent =nullptr;
+                              }
+                              return true;
+                          }
+                          else {
+                              return false;
+                          }
+                      })
+                   , el.second.end());
+  }
+
 }
 
 
