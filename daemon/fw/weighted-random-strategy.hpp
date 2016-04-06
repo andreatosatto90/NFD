@@ -52,6 +52,9 @@ public:
   beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
                         const Face& inFace, const Data& data) DECL_OVERRIDE;
 
+  //virtual void
+  //beforeExpirePendingInterest(shared_ptr<pit::Entry> pitEntry) DECL_OVERRIDE;
+
 public:
 
   class PendingInterest
@@ -103,7 +106,7 @@ protected:
                               ndn::util::NetworkInterfaceState newState);
 
   void
-  resendPendingInterest();
+  sendInvalidPendingInterest();
 
   void
   resendPendingInterestRetry();
@@ -132,13 +135,13 @@ protected:
 
   const Name& m_name;
   interfacesInfos m_interfacesInfo;
+
   std::unordered_map<std::string/*interfaceName*/,pendingInterests> m_interfaceInterests;
   std::mt19937 m_randomGen;
 
   bool m_errorState;
   shared_ptr<ndn::util::NetworkInterface> m_runningInterface;
   shared_ptr<Face> lastFace;
-
   shared_ptr<ndn::util::scheduler::EventId> retryEvent;
 
   // Rtt
@@ -152,6 +155,7 @@ protected:
   int m_nRttMean;
   std::vector<float> m_oldRtt;
   std::pair<float /*old*/, float /*new*/> rttMeanWeight;
+  time::steady_clock::TimePoint lastRttTime;
 
 };
 

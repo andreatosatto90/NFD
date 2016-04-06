@@ -219,13 +219,6 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
 
   NFD_LOG_FACE_TRACE("Received from : "<< m_remoteEndpoint << " -> " << nBytesReceived << " bytes");
 
-  // TODO better conversion
-  std::ostringstream local;
-  local << m_localEndpoint;
-  std::ostringstream remote;
-  remote << m_remoteEndpoint;
-  tracepoint(faceLog, packet_received, local.str().c_str(), remote.str().c_str(), nBytesReceived);
-
   bool isOk = false;
   Block element;
   std::tie(isOk, element) = Block::fromBuffer(buffer, nBytesReceived);
@@ -240,6 +233,13 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
     return;
   }
   m_hasBeenUsedRecently = true;
+
+  // TODO better conversion
+  std::ostringstream local;
+  local << m_localEndpoint;
+  std::ostringstream remote;
+  remote << m_remoteEndpoint;
+  tracepoint(faceLog, packet_received, local.str().c_str(), remote.str().c_str(), nBytesReceived);
 
   Transport::Packet tp(std::move(element));
   tp.remoteEndpoint = makeEndpointId(m_sender);

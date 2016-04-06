@@ -117,6 +117,9 @@ public: // InRecord
   bool
   hasLocalInRecord() const;
 
+  bool
+  hasValidLocalInRecord() const;
+
   /** \brief inserts a InRecord for face, and updates it with interest
    *
    *  If InRecord for face exists, the existing one is updated.

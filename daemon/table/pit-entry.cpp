@@ -47,7 +47,15 @@ bool
 Entry::hasLocalInRecord() const
 {
   return std::any_of(m_inRecords.begin(), m_inRecords.end(),
-    [] (const InRecord& inRecord) { return inRecord.getFace()->getScope() == ndn::nfd::FACE_SCOPE_LOCAL; });
+                     [] (const InRecord& inRecord) { return inRecord.getFace()->getScope() == ndn::nfd::FACE_SCOPE_LOCAL; });
+}
+
+bool
+Entry::hasValidLocalInRecord() const
+{
+  return std::any_of(m_inRecords.begin(), m_inRecords.end(),
+                     [] (const InRecord& inRecord) { return inRecord.getFace()->getId() != face::INVALID_FACEID
+                                                            && inRecord.getFace()->getScope() == ndn::nfd::FACE_SCOPE_LOCAL; });
 }
 
 bool
