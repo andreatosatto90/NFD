@@ -121,8 +121,6 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
 
         totalWeight += prob;
         eligibleFaces[totalWeight] = outFace;
-        tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
-                   outFace->getId(), outFace->getInterfaceName().c_str());
         //NFD_LOG_DEBUG("Eligible face: " << outFace->getId());
       }
     }
@@ -141,6 +139,9 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
       shared_ptr<Face> outFace = it->second;
       NFD_LOG_TRACE("Interest to face: " << outFace->getId());
       this->sendInterest(pitEntry, outFace);
+
+      tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
+                 outFace->getId(), outFace->getInterfaceName().c_str());
 
       auto interestList = m_interfaceInterests.insert({outFace->getInterfaceName(), pendingInterests()}).first;
 
@@ -379,6 +380,9 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
         NFD_LOG_TRACE("Resend single interest NOW" << pitEntry->getName());
         this->sendInterest(pitEntry, outFace, true);
         pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
+        tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
+                   outFace->getId(), outFace->getInterfaceName().c_str());
+
       }
     }
     else {
@@ -395,6 +399,8 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
           NFD_LOG_TRACE("Resend single interest defer " << pitEntry->getName() << " " << pitEntry->m_unsatisfyTimer);
           this->sendInterest(pitEntry, outFace, true);
           pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
+          tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
+                     outFace->getId(), outFace->getInterfaceName().c_str());
         }
       //}
       //else {

@@ -29,6 +29,23 @@ TRACEPOINT_EVENT(
 
 TRACEPOINT_EVENT(
   strategyLog,
+  interest_sent_retry,
+  TP_ARGS(
+    const char*, strategyName,
+    const char*, interest,
+    int, faceId,
+    const char*, interfaceName
+  ),
+  TP_FIELDS(
+    ctf_string(strategy_name, strategyName)
+    ctf_string(interest_name, interest)
+    ctf_integer(int, face_id, faceId)
+    ctf_string(interface_name, interfaceName)
+  )
+)
+
+TRACEPOINT_EVENT(
+  strategyLog,
   data_received,
   TP_ARGS(
     const char*, strategyName,
