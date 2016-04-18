@@ -29,6 +29,8 @@
 #include "strategy.hpp"
 #include <boost/random/uniform_int_distribution.hpp>
 
+#include "strategies-prod-tracepoint.hpp"
+
 namespace nfd {
 
 NFD_LOG_INIT("Forwarder");
@@ -101,6 +103,8 @@ Forwarder::startProcessNack(Face& face, const lp::Nack& nack)
 void
 Forwarder::onIncomingInterest(Face& inFace, const Interest& interest)
 {
+  tracepoint(strategyProdLog, interest_received, interest.toUri().c_str());
+
   // receive Interest
   NFD_LOG_DEBUG("onIncomingInterest face=" << inFace.getId() <<
                 " interest=" << interest.getName());

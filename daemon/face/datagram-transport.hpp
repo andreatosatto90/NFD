@@ -223,12 +223,12 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
   Block element;
   std::tie(isOk, element) = Block::fromBuffer(buffer, nBytesReceived);
   if (!isOk) {
-    NFD_LOG_FACE_WARN("Failed to parse incoming packet");
+    //NFD_LOG_FACE_WARN("Failed to parse incoming packet");
     // This packet won't extend the face lifetime
     return;
   }
   if (element.size() != nBytesReceived) {
-    NFD_LOG_FACE_WARN("Received datagram size and decoded element size don't match E: " << element.size() << " R: " <<  nBytesReceived);
+    //NFD_LOG_FACE_WARN("Received datagram size and decoded element size don't match E: " << element.size() << " R: " <<  nBytesReceived);
     // This packet won't extend the face lifetime
     return;
   }
@@ -344,7 +344,7 @@ DatagramTransport<T, U>::handleSend(const boost::system::error_code& error,
   if (error)
     return processErrorCode(error);
 
-  NFD_LOG_FACE_TRACE("Successfully sent: " << nBytesSent << " bytes");
+  NFD_LOG_FACE_DEBUG("Successfully sent: " << nBytesSent << " bytes");
 
   // TODO better conversion
   std::ostringstream local;

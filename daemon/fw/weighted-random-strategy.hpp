@@ -67,16 +67,19 @@ public:
       , outFace(outFace)
       , fibEntry(fibEntry)
       , pitEntry(pitEntry)
-      , lastSent(lastSent)
+      , retriesTimes()
       , retryEvent(retryEvent)
-      , invalid(false){}
+      , invalid(false)
+      {
+        retriesTimes.push_back(lastSent);
+      }
 
 
     std::string interfaceName;
     shared_ptr<Face> outFace;
     shared_ptr<fib::Entry> fibEntry;
     shared_ptr<pit::Entry> pitEntry;
-    time::steady_clock::TimePoint lastSent;
+    std::vector<time::steady_clock::TimePoint> retriesTimes;
     shared_ptr<ndn::util::scheduler::EventId> retryEvent;
     shared_ptr<ndn::util::scheduler::EventId> deleteEvent;
     bool invalid;
@@ -119,13 +122,16 @@ protected:
   removePendingInterest(shared_ptr<PendingInterest>& pi, shared_ptr<pit::Entry> pitEntry);
 
   void
+  deletePendingInterest(const shared_ptr<pit::Entry>& pitEntry);
+
+  void
   handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni);
 
   void
   handleInterfaceRemoved(const shared_ptr<ndn::util::NetworkInterface>& ni);
 
   float
-  addRttMeasurement(float rtt);
+  addRttMeasurement(const shared_ptr<PendingInterest>& pi);
 
   float
   getSendTimeout();
@@ -151,6 +157,10 @@ protected:
   float m_rttMax;
   float m_rttMin;
   float m_lastRtt;
+
+  float m_rttMinCalc;
+  float m_rttMinCalcStart;
+  float m_rttNoRetries;
 
   int m_nRttMean;
   std::vector<float> m_oldRtt;

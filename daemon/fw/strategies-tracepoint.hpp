@@ -17,13 +17,15 @@ TRACEPOINT_EVENT(
     const char*, strategyName,
     const char*, interest,
     int, faceId,
-    const char*, interfaceName
+    const char*, interfaceName,
+    int, retryTimeout
   ),
   TP_FIELDS(
     ctf_string(strategy_name, strategyName)
     ctf_string(interest_name, interest)
     ctf_integer(int, face_id, faceId)
     ctf_string(interface_name, interfaceName)
+    ctf_integer(int, retry_timeout, retryTimeout)
   )
 )
 
@@ -34,13 +36,15 @@ TRACEPOINT_EVENT(
     const char*, strategyName,
     const char*, interest,
     int, faceId,
-    const char*, interfaceName
+    const char*, interfaceName,
+    int, retryTimeout
   ),
   TP_FIELDS(
     ctf_string(strategy_name, strategyName)
     ctf_string(interest_name, interest)
     ctf_integer(int, face_id, faceId)
     ctf_string(interface_name, interfaceName)
+    ctf_integer(int, retry_timeout, retryTimeout)
   )
 )
 
@@ -53,7 +57,9 @@ TRACEPOINT_EVENT(
     int, faceId,
     const char*, interfaceName,
     int, rtt,
-    int, meanRtt
+    int, meanRtt,
+    int, nRetries,
+    int, retrieveTime
   ),
   TP_FIELDS(
     ctf_string(strategy_name, strategyName)
@@ -62,6 +68,8 @@ TRACEPOINT_EVENT(
     ctf_string(interface_name, interfaceName)
     ctf_integer(int, rtt, rtt)
     ctf_integer(int, mean_rtt, meanRtt)
+    ctf_integer(int, num_retries, nRetries)
+    ctf_integer(int, retrieve_time, retrieveTime)
   )
 )
 
@@ -84,6 +92,17 @@ TRACEPOINT_EVENT(
   ),
   TP_FIELDS(
     ctf_integer(int, rtt_max, val)
+  )
+)
+
+TRACEPOINT_EVENT(
+  strategyLog,
+  rtt_min_calc,
+  TP_ARGS(
+    int, val
+  ),
+  TP_FIELDS(
+    ctf_integer(int, rtt_min_calc, val)
   )
 )
 

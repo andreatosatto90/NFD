@@ -54,10 +54,16 @@ WeightedRandomStrategy::WeightedRandomStrategy(Forwarder& forwarder, const Name&
   rttMeanWeight.second = 0.7; // New value
   m_rttMean = -1;
   m_lastRtt = -1;
-  m_rttMulti = 1.2;
+  m_rttMulti = 2;
   m_rttMin = 20;
-  m_rttMax = 1000;
+  m_rttMax = 800;
   m_rtt0 = 150;
+
+  m_rttMinCalcStart = 30;
+  m_rttMinCalc = -1;
+
+  m_rttNoRetries = -1;
+
 
   m_nRttMean = 5;
   //lastRttTime = time::steady_clock::now();
@@ -98,6 +104,31 @@ predicate_NextHop_eligible(const shared_ptr<pit::Entry>& pitEntry,
 }
 
 void
+WeightedRandomStrategy::deletePendingInterest(const shared_ptr<pit::Entry>& pitEntry)
+{
+  for (auto& el : m_interfaceInterests) {
+    el.second.erase(std::remove_if(el.second.begin(), el.second.end(),
+                      [&](shared_ptr<PendingInterest>& pi) {
+                          if(pi->pitEntry == pitEntry) {
+                              NFD_LOG_DEBUG("Delete retrasmission");
+                              if (pi->retryEvent != nullptr) {
+                                 m_scheduler.cancelEvent(*(pi->retryEvent));
+                                 pi->retryEvent = nullptr;
+                              }
+                              if (pi->deleteEvent != nullptr) {
+                                m_scheduler.cancelEvent(*(pi->deleteEvent));
+                                pi->deleteEvent =nullptr;
+                              }
+                              return true;
+                          }
+                          else
+                            return false;
+                      })
+                   , el.second.end());
+  }
+}
+
+void
 WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
                                              const Interest& interest,
                                              shared_ptr<fib::Entry> fibEntry,
@@ -110,6 +141,9 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
 //    // not a new Interest, don't forward
 //    return;
 //  }
+
+  deletePendingInterest(pitEntry);
+
   float totalWeight = 0;
   const fib::NextHopList& nexthops = fibEntry->getNextHops();
   std::map<int, shared_ptr<Face>> eligibleFaces;
@@ -140,15 +174,16 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
       NFD_LOG_TRACE("Interest to face: " << outFace->getId());
       this->sendInterest(pitEntry, outFace);
 
-      tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
-                 outFace->getId(), outFace->getInterfaceName().c_str());
-
       auto interestList = m_interfaceInterests.insert({outFace->getInterfaceName(), pendingInterests()}).first;
 
       auto pi = make_shared<PendingInterest>(PendingInterest(outFace->getInterfaceName(), outFace, fibEntry, pitEntry, time::steady_clock::now(), nullptr));
       interestList->second.push_back(pi);
       pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
       pi->deleteEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime()), bind(&WeightedRandomStrategy::removePendingInterest, this, pi, pitEntry)));
+
+
+      tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
+                 outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout());
 
       //NFD_LOG_DEBUG("Current pipeline size " << interestList->second.size());
       //
@@ -180,6 +215,9 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
     pi->deleteEvent = nullptr;
     interestList->second.push_back(pi);
 
+    tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
+               lastFace->getId(), lastFace->getInterfaceName().c_str(), -2);
+
     //pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, lastFace, time::steady_clock::now(), pi, false)));
     //pi->deleteEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime()), bind(&WeightedRandomStrategy::removePendingInterest, this, pi, pitEntry)));
     return;
@@ -203,9 +241,9 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
 {
   if (pitEntry->hasValidLocalInRecord()) {
 
-    NFD_LOG_DEBUG("Data received " << pitEntry->getName());
+    NFD_LOG_TRACE("Data received " << pitEntry->getName());
     bool hasOutRecords = true;
-    time::milliseconds rtt = time::milliseconds(-1);
+    float rtt = -1;
     pit::OutRecordCollection::const_iterator outRecord = pitEntry->getOutRecord(inFace);
     if (outRecord == pitEntry->getOutRecords().end()) { // no OutRecord
       /*NFD_LOG_TRACE(pitEntry->getInterest() << " dataFrom " << inFace.getId() <<
@@ -229,21 +267,19 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
     if (!hasOutRecords)
        NFD_LOG_DEBUG("No valid out records");
 
-
+    int nRetries = -1;
+    int retrieveTime = -1;
 
     for (auto& el : m_interfaceInterests) {
-      //NFD_LOG_DEBUG(" Remove pending received " << el.second.size());
       el.second.erase(std::remove_if(el.second.begin(), el.second.end(),
                         [&](shared_ptr<PendingInterest>& pi) {
-                            if (pi->pitEntry->getInRecords().size() > 1)
-                              NFD_LOG_DEBUG("DOUBLE");
-                            if((pi->pitEntry == pitEntry) || !pi->pitEntry->hasValidLocalInRecord()) {
-                                if(pi->pitEntry == pitEntry && hasOutRecords) {
-                                    rtt = time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->lastSent);
-                                    addRttMeasurement(rtt.count());
-                                    //NFD_LOG_DEBUG("Mean Rtt: " << m_rttMean);
-                                }
+                            if((pi->pitEntry == pitEntry) || !pi->pitEntry->hasValidLocalInRecord()) {  
 
+                                if(pi->pitEntry == pitEntry && hasOutRecords && !pi->retriesTimes.empty()) {
+                                    nRetries = pi->retriesTimes.size() - 1;
+                                    retrieveTime = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[0])).count();
+                                    rtt = addRttMeasurement(pi);
+                                }
                                 if (pi->retryEvent != nullptr) {
                                    m_scheduler.cancelEvent(*(pi->retryEvent));
                                    pi->retryEvent = nullptr;
@@ -253,63 +289,25 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
                                   pi->deleteEvent =nullptr;
                                 }
                                 return true;
-                                //
                             }
                             else {
-//                              if (pi->retryEvent == nullptr) {
-//                                //NFD_LOG_DEBUG("LOST");
-
-//                              }
                               return false;
                             }
                         })
                      , el.second.end());
-      //NFD_LOG_DEBUG("Current pipeline A " << el.second.size());
     }
 
-    if (hasOutRecords) // TODO we need the check?
+    if (hasOutRecords)
       tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
-                 inFace.getId(), inFace.getInterfaceName().c_str(), rtt.count(), m_rttMean);
+                 inFace.getId(), inFace.getInterfaceName().c_str(), rtt, m_rttMean, nRetries, retrieveTime);
 
     //data.setTag(make_shared<lp::StrategyNotify>(5));
     if (m_errorState == true) {
-      sendInvalidPendingInterest();
+      //sendInvalidPendingInterest();
       m_errorState = false;
     }
   }
 }
-
-//void
-//WeightedRandomStrategy::beforeExpirePendingInterest(shared_ptr<pit::Entry> pitEntry)
-//{
-//  NFD_LOG_DEBUG("Expired1: " << pitEntry->getName());
-
-//  for (auto& el : m_interfaceInterests) {
-//    NFD_LOG_DEBUG(" Actual size " << el.second.size());
-
-//    //el.second.erase(std::remove(el.second.begin(), el.second.end(), pi), el.second.end());
-//    el.second.erase(std::remove_if(el.second.begin(), el.second.end(),
-//                      [&](shared_ptr<PendingInterest>& piTmp) {
-//                          if(piTmp->pitEntry == pitEntry) {
-//                              NFD_LOG_DEBUG("Done:  " << piTmp->pitEntry->getName() );
-//                              if (piTmp->retryEvent != nullptr) {
-//                                 m_scheduler.cancelEvent(*(piTmp->retryEvent));
-//                                 piTmp->retryEvent = nullptr;
-
-//                              }
-//                              if (piTmp->deleteEvent != nullptr) {
-//                                m_scheduler.cancelEvent(*(piTmp->deleteEvent));
-//                                piTmp->deleteEvent =nullptr;
-//                              }
-//                              return true;
-//                          }
-//                          else {
-//                              return false;
-//                          }
-//                      })
-//                   , el.second.end());
-//  }
-//}
 
 void
 WeightedRandomStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterface>& ni,
@@ -317,6 +315,7 @@ WeightedRandomStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::Networ
                                                     ndn::util::NetworkInterfaceState newState)
 {
   if (newState == ndn::util::NetworkInterfaceState::RUNNING) {
+    NFD_LOG_DEBUG("Interface UP");
     m_errorState = true;
     m_runningInterface = ni;
     sendInvalidPendingInterest();
@@ -336,12 +335,15 @@ WeightedRandomStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::Networ
       }
 
       m_rttMean = -1;
+      m_rttMinCalc = -1;
     }
   }
 }
 
-void WeightedRandomStrategy::sendInvalidPendingInterest()
+void
+WeightedRandomStrategy::sendInvalidPendingInterest()
 {
+  NFD_LOG_DEBUG("Resend all after interface down");
   if (m_errorState) {
     if (m_runningInterface->getState() == ndn::util::NetworkInterfaceState::RUNNING) {
       auto list = m_interfaceInterests.find(m_runningInterface->getName());
@@ -349,7 +351,7 @@ void WeightedRandomStrategy::sendInvalidPendingInterest()
         NFD_LOG_TRACE("Resend size " << list->second.size());
         for (shared_ptr<PendingInterest>& pi : list->second) {
           if (pi->invalid) {
-            pi->lastSent = time::steady_clock::now();
+            pi->retriesTimes.clear();
             pi->invalid = false;
           }
           //NFD_LOG_DEBUG("Resend interest " << pi->pitEntry->getName());
@@ -357,7 +359,8 @@ void WeightedRandomStrategy::sendInvalidPendingInterest()
 //            m_scheduler.cancelEvent(*(pi->retryEvent));
 //          }
           if (pi->retryEvent == nullptr) {
-            pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pi->pitEntry, pi->outFace, time::steady_clock::now(), pi, true)));
+            retryInterest(pi->pitEntry, pi->outFace, time::steady_clock::now(), pi, true);
+            //pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pi->pitEntry, pi->outFace, time::steady_clock::now(), pi, true)));
           }
             //this->sendInterest(el.pitEntry, el.outFace, true);
           //el.lastSent = time::steady_clock::now();
@@ -373,41 +376,33 @@ void
 WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr<Face> outFace,
                                       time::steady_clock::TimePoint sentTime, shared_ptr<PendingInterest> pi, bool now)
 {
-  if (pi->retryEvent != nullptr) {
-    pi->retryEvent = nullptr;
-    if (now) {
+  if (now) {
       if (pi->pitEntry->hasValidLocalInRecord()) {
         NFD_LOG_TRACE("Resend single interest NOW" << pitEntry->getName());
         this->sendInterest(pitEntry, outFace, true);
         pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
+        pi->retriesTimes.push_back(time::steady_clock::now());
         tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
-                   outFace->getId(), outFace->getInterfaceName().c_str());
+                   outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout());
 
       }
+  }
+  else if (pi->retryEvent != nullptr) {
+    pi->retryEvent = nullptr;
+
+    if (pi->pitEntry->hasValidLocalInRecord()) {
+      for(auto& in : pitEntry->getInRecords()) {
+        NFD_LOG_TRACE("Face in: " << in.getFace()->getId());
+      }
+
+
+      NFD_LOG_TRACE("Resend single interest defer " << pitEntry->getName() << " " << pitEntry->m_unsatisfyTimer);
+      this->sendInterest(pitEntry, outFace, true);
+      pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
+      pi->retriesTimes.push_back(time::steady_clock::now());
+      tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
+                 outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout());
     }
-    else {
-      //time::milliseconds timeoutTime(time::duration_cast<time::milliseconds>(time::steady_clock::now() - sentTime).count());
-      //if (timeoutTime.count() > getSendTimeout()) {
-        //
-
-        if (pi->pitEntry->hasValidLocalInRecord()) {
-          for(auto& in : pitEntry->getInRecords()) {
-            NFD_LOG_TRACE("Face in: " << in.getFace()->getId());
-          }
-
-
-          NFD_LOG_TRACE("Resend single interest defer " << pitEntry->getName() << " " << pitEntry->m_unsatisfyTimer);
-          this->sendInterest(pitEntry, outFace, true);
-          pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
-          tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
-                     outFace->getId(), outFace->getInterfaceName().c_str());
-        }
-      //}
-      //else {
-       // pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout()) - timeoutTime.count()), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
-      //}
-    }
-
   }
 }
 
@@ -442,30 +437,6 @@ WeightedRandomStrategy::removePendingInterest(shared_ptr<PendingInterest>& pi, s
 
 }
 
-
-
-/*void
-WeightedRandomStrategy::resendPendingInterestRetry()
-{
-  if( lastFace != nullptr && m_runningInterface !=nullptr && m_interfaceInterests.size() > 0) {
-    if (m_runningInterface->getState() == ndn::util::NetworkInterfaceState::RUNNING) {
-      auto list = m_interfaceInterests.find(m_runningInterface->getName());
-      if (list != m_interfaceInterests.end()) {
-        for (PendingInterest& el : list->second) {
-          if (time::duration_cast<time::milliseconds>(time::steady_clock::now() - el.lastSent).count() > 500) {
-            NFD_LOG_DEBUG("Resend interest timeout " << el.pitEntry->getName());
-            this->sendInterest(el.pitEntry, el.outFace, true);
-          }
-        }
-      }
-    }
-    m_scheduler.scheduleEvent(time::milliseconds(300), bind(&WeightedRandomStrategy::resendPendingInterestRetry, this));
-  }
-  else
-    m_scheduler.scheduleEvent(time::milliseconds(300), bind(&WeightedRandomStrategy::resendPendingInterestRetry, this));
-
-}*/
-
 void
 WeightedRandomStrategy::handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni)
 {
@@ -479,8 +450,29 @@ WeightedRandomStrategy::handleInterfaceRemoved(const shared_ptr<ndn::util::Netwo
 }
 
 float
-WeightedRandomStrategy::addRttMeasurement(float rtt)
+WeightedRandomStrategy::addRttMeasurement(const shared_ptr<PendingInterest>& pi)
 {
+  float rtt;
+  if (pi->retriesTimes.size() == 1) { // No retry
+    rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[0])).count();
+
+    if (m_rttMinCalc == -1)
+      m_rttMinCalc = rtt;
+    else
+      m_rttMinCalc = (m_rttMinCalc * rttMeanWeight.first) + (rtt * rttMeanWeight.second);
+
+    tracepoint(strategyLog, rtt_min_calc, m_rttMinCalc);
+    //NFD_LOG_DEBUG("Rtt min calc: " << m_rttMinCalc);
+  }
+  else if (pi->retriesTimes.size() > 1) { // At least 1 retry
+    rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[pi->retriesTimes.size() - 1])).count();
+    if (m_rttMinCalc != -1 && rtt < m_rttMinCalc) {
+      rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[pi->retriesTimes.size() - 2])).count();
+      //NFD_LOG_DEBUG("Discard ");
+    }
+  }
+  else
+    return -1; // This should not happen
 
   //lastRttTime = time::steady_clock::now();
   if (rtt < m_rttMin) {
@@ -530,7 +522,7 @@ WeightedRandomStrategy::getSendTimeout()
     if (m_lastRtt == -1)
       m_rttMean = m_rtt0;
     else
-      m_rttMean = m_rtt0;
+      m_rttMean = m_lastRtt;
   }
 
   float rtt = m_rttMean * m_rttMulti;

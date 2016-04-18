@@ -104,7 +104,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
       shared_ptr<Face> outFace = nextHop.getFace();
       eligibleFaces.push_back(outFace);
       tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
-                 outFace->getId(), outFace->getTransport()->getInterfaceName().c_str());
+                 outFace->getId(), outFace->getTransport()->getInterfaceName().c_str(), -1);
     }
   }
 
@@ -116,7 +116,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
         shared_ptr<Face> outFace = nextHop.getFace();
         eligibleFaces.push_back(outFace);
         tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
-                   outFace->getId(), outFace->getInterfaceName().c_str());
+                   outFace->getId(), outFace->getInterfaceName().c_str(), -1);
       }
     }
   }
@@ -141,7 +141,7 @@ PreferredWlanStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
 {
   if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
     tracepoint(strategyLog, data_received, STRATEGY_NAME.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
-               inFace.getId(), inFace.getInterfaceName().c_str(), -1, -1);
+               inFace.getId(), inFace.getInterfaceName().c_str(), -1, -1, -1, -1);
 }
 
 int
