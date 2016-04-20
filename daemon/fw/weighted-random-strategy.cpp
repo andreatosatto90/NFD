@@ -55,17 +55,12 @@ WeightedRandomStrategy::WeightedRandomStrategy(Forwarder& forwarder, const Name&
   m_rttMean = -1;
   m_lastRtt = -1;
   m_rttMulti = 2;
-  m_rttMin = 20;
-  m_rttMax = 800;
-  m_rtt0 = 150;
-
-  m_rttMinCalcStart = 30;
+  m_rttMin = 10;
+  m_rttMax = 1000;
+  m_rtt0 = 250;
   m_rttMinCalc = -1;
 
-  m_rttNoRetries = -1;
-
-
-  m_nRttMean = 5;
+  m_nSamples = 5;
   //lastRttTime = time::steady_clock::now();
 
 }
@@ -258,10 +253,6 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
         }
         ++outRecord;
       }
-  //    rtt = time::duration_cast<time::milliseconds> (time::steady_clock::now() - outRecord->getLastRenewed());
-  //    addRttMeasurement(rtt.count());
-  //    NFD_LOG_DEBUG("Mean Rtt: " << m_rttMean);
-      //NFD_LOG_DEBUG("Mean Rtt: " << m_rttMean);
     }
 
     if (!hasOutRecords)
@@ -299,7 +290,9 @@ WeightedRandomStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
 
     if (hasOutRecords)
       tracepoint(strategyLog, data_received, m_name.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
-                 inFace.getId(), inFace.getInterfaceName().c_str(), rtt, m_rttMean, nRetries, retrieveTime);
+                 inFace.getId(), inFace.getInterfaceName().c_str(), rtt, m_rttMean, nRetries, retrieveTime, m_lastRtt);
+
+    //NFD_LOG_WARN("Retries " << nRetries << " RTT " << rtt << " bounded " << m_lastRtt << " Mean " << m_rttMean << " Min " << m_rttMinCalc);
 
     //data.setTag(make_shared<lp::StrategyNotify>(5));
     if (m_errorState == true) {
@@ -362,7 +355,7 @@ WeightedRandomStrategy::sendInvalidPendingInterest()
             retryInterest(pi->pitEntry, pi->outFace, time::steady_clock::now(), pi, true);
             //pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pi->pitEntry, pi->outFace, time::steady_clock::now(), pi, true)));
           }
-            //this->sendInterest(el.pitEntry, el.outFace, true);
+          //this->sendInterest(el.pitEntry, el.outFace, true);
           //el.lastSent = time::steady_clock::now();
           //m_scheduler.scheduleEvent(time::milliseconds(200), bind(&WeightedRandomStrategy::resendPendingInterest, this));
         }
@@ -452,62 +445,76 @@ WeightedRandomStrategy::handleInterfaceRemoved(const shared_ptr<ndn::util::Netwo
 float
 WeightedRandomStrategy::addRttMeasurement(const shared_ptr<PendingInterest>& pi)
 {
-  float rtt;
+  float rtt = -1;
   if (pi->retriesTimes.size() == 1) { // No retry
     rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[0])).count();
 
-    if (m_rttMinCalc == -1)
+    if (m_rttMinCalc == -1) {
       m_rttMinCalc = rtt;
-    else
+      tracepoint(strategyLog, rtt_min_calc, m_rttMinCalc);
+    }
+    else if (rtt < m_rttMinCalc) {
+      m_rttMinCalc = rtt;
+      tracepoint(strategyLog, rtt_min_calc, m_rttMinCalc);
+    }
+    /*else {
       m_rttMinCalc = (m_rttMinCalc * rttMeanWeight.first) + (rtt * rttMeanWeight.second);
+      tracepoint(strategyLog, rtt_min_calc, m_rttMinCalc);
+    }*/
 
-    tracepoint(strategyLog, rtt_min_calc, m_rttMinCalc);
+
     //NFD_LOG_DEBUG("Rtt min calc: " << m_rttMinCalc);
   }
   else if (pi->retriesTimes.size() > 1) { // At least 1 retry
-    rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[pi->retriesTimes.size() - 1])).count();
-    if (m_rttMinCalc != -1 && rtt < m_rttMinCalc) {
-      rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[pi->retriesTimes.size() - 2])).count();
-      //NFD_LOG_DEBUG("Discard ");
+    for (int i = pi->retriesTimes.size(); i > 0; i--) {
+      rtt = (time::duration_cast<time::milliseconds> (time::steady_clock::now() - pi->retriesTimes[i - 1])).count();
+      if (m_rttMinCalc != -1 && rtt >= m_rttMinCalc)
+        break;
     }
   }
   else
     return -1; // This should not happen
 
-  //lastRttTime = time::steady_clock::now();
-  if (rtt < m_rttMin) {
+  float rttOriginal = rtt;
+
+  if (m_rttMinCalc == -1 && rtt < m_rttMin) {
     tracepoint(strategyLog, rtt_min, rtt);
     rtt = m_rttMin;
   }
-  else if (rtt > m_rttMax) {
+  else if (m_rttMinCalc != -1 && rtt < m_rttMinCalc) {
+    tracepoint(strategyLog, rtt_min, rtt);
+    rtt = m_rttMinCalc;
+  }
+
+  if (rtt > m_rttMax) {
     tracepoint(strategyLog, rtt_max, rtt);
     rtt = m_rttMax;
   }
-/*if (m_oldRtt.size() > m_nRttMean) {
+
+
+
+  while (m_oldRtt.size() > m_nSamples) {
     m_oldRtt.erase(m_oldRtt.begin());
   }
   m_oldRtt.push_back(rtt);
 
-  if (m_oldRtt.size() > 2) {
-    float newMean = 1;
-    for(int i = 0; i < m_oldRtt.size(); i++) {
-      newMean = (m_oldRtt[i] * rttMeanWeight.first) + (m_oldRtt[i+1] * rttMeanWeight.second);
-    }
-    m_lastRtt = rtt;
-    m_rttMean = newMean;
+  float newMean = m_oldRtt[0];
+  for(uint32_t i = 1; i < m_oldRtt.size(); i++) {
+    newMean = (newMean * rttMeanWeight.first) + (m_oldRtt[i] * rttMeanWeight.second);
   }
-  else {
-    m_lastRtt = rtt;
-    m_rttMean = rtt;
-  }*/
 
-  if (m_rttMean == -1)
+  m_lastRtt = rtt;
+  m_rttMean = newMean;
+
+
+  /*if (m_rttMean == -1)
     m_rttMean = rtt;
   else
     m_rttMean = (m_rttMean * rttMeanWeight.first) + (rtt * rttMeanWeight.second);
+  m_lastRtt = rtt;*/
 
-  m_lastRtt = rtt;
-  return m_rttMean;
+
+  return rttOriginal;
 }
 
 float
@@ -526,6 +533,9 @@ WeightedRandomStrategy::getSendTimeout()
   }
 
   float rtt = m_rttMean * m_rttMulti;
+
+  if (rtt < 0) // TODO
+    return 1;
 
   return rtt;
 }

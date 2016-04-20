@@ -39,6 +39,40 @@ TRACEPOINT_EVENT(
   )
 )
 
+TRACEPOINT_EVENT(
+  faceLog,
+  packet_received_error,
+  TP_ARGS(
+    const char*, localEndpoint,
+    const char*, remoteEndpoint,
+    int, bytes,
+    int, errorNum
+  ),
+  TP_FIELDS(
+    ctf_string(local_endpoint, localEndpoint)
+    ctf_string(remote_endpoint, remoteEndpoint)
+    ctf_integer(int, bytes, bytes)
+    ctf_integer(int, error, errorNum)
+  )
+)
+
+TRACEPOINT_EVENT(
+  faceLog,
+  packet_sent_error,
+  TP_ARGS(
+    const char*, localEndpoint,
+    const char*, remoteEndpoint,
+    int, bytes,
+    int, errorNum
+  ),
+  TP_FIELDS(
+    ctf_string(local_endpoint, localEndpoint)
+    ctf_string(remote_endpoint, remoteEndpoint)
+    ctf_integer(int, bytes, bytes)
+    ctf_integer(int, error, errorNum)
+  )
+)
+
 #endif // NFD_DAEMON_FACE_FACE_TRACEPOINT_HPP
 
 #include <lttng/tracepoint-event.h>

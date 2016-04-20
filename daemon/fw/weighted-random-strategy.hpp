@@ -159,10 +159,8 @@ protected:
   float m_lastRtt;
 
   float m_rttMinCalc;
-  float m_rttMinCalcStart;
-  float m_rttNoRetries;
 
-  int m_nRttMean;
+  uint32_t m_nSamples;
   std::vector<float> m_oldRtt;
   std::pair<float /*old*/, float /*new*/> rttMeanWeight;
   time::steady_clock::TimePoint lastRttTime;

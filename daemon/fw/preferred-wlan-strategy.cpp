@@ -141,7 +141,7 @@ PreferredWlanStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
 {
   if (pitEntry->getOutRecords().size() > 0) // TODO we need the check?
     tracepoint(strategyLog, data_received, STRATEGY_NAME.toUri().c_str(), pitEntry->getInterest().toUri().c_str(),
-               inFace.getId(), inFace.getInterfaceName().c_str(), -1, -1, -1, -1);
+               inFace.getId(), inFace.getInterfaceName().c_str(), -1, -1, -1, -1, -1);
 }
 
 int

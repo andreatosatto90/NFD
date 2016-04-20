@@ -219,26 +219,30 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
 
   NFD_LOG_FACE_TRACE("Received from : "<< m_remoteEndpoint << " -> " << nBytesReceived << " bytes");
 
-  bool isOk = false;
-  Block element;
-  std::tie(isOk, element) = Block::fromBuffer(buffer, nBytesReceived);
-  if (!isOk) {
-    //NFD_LOG_FACE_WARN("Failed to parse incoming packet");
-    // This packet won't extend the face lifetime
-    return;
-  }
-  if (element.size() != nBytesReceived) {
-    //NFD_LOG_FACE_WARN("Received datagram size and decoded element size don't match E: " << element.size() << " R: " <<  nBytesReceived);
-    // This packet won't extend the face lifetime
-    return;
-  }
-  m_hasBeenUsedRecently = true;
-
   // TODO better conversion
   std::ostringstream local;
   local << m_localEndpoint;
   std::ostringstream remote;
   remote << m_remoteEndpoint;
+
+  bool isOk = false;
+  Block element;
+  std::tie(isOk, element) = Block::fromBuffer(buffer, nBytesReceived);
+  if (!isOk) {
+    NFD_LOG_FACE_WARN("Failed to parse incoming packet");
+    tracepoint(faceLog, packet_received_error, local.str().c_str(), remote.str().c_str(), nBytesReceived, 1);
+    // This packet won't extend the face lifetime
+    return;
+  }
+  if (element.size() != nBytesReceived) {
+    NFD_LOG_FACE_WARN("Received datagram size and decoded element size don't match E: " << element.size() << " R: " <<  nBytesReceived);
+    tracepoint(faceLog, packet_received_error, local.str().c_str(), remote.str().c_str(), nBytesReceived, 2);
+    // This packet won't extend the face lifetime
+    return;
+  }
+  m_hasBeenUsedRecently = true;
+
+
   tracepoint(faceLog, packet_received, local.str().c_str(), remote.str().c_str(), nBytesReceived);
 
   Transport::Packet tp(std::move(element));
@@ -341,17 +345,26 @@ DatagramTransport<T, U>::handleSend(const boost::system::error_code& error,
                                     size_t nBytesSent, const Block& payload)
 // 'payload' is unused; it's needed to retain the underlying Buffer
 {
-  if (error)
-    return processErrorCode(error);
-
-  NFD_LOG_FACE_DEBUG("Successfully sent: " << nBytesSent << " bytes");
-
   // TODO better conversion
   std::ostringstream local;
   local << m_localEndpoint;
   std::ostringstream remote;
   remote << m_remoteEndpoint;
-  tracepoint(faceLog, packet_sent, local.str().c_str(), remote.str().c_str(), nBytesSent);
+
+  if (error) {
+    NFD_LOG_FACE_DEBUG(" NOT sent: " << nBytesSent << " bytes");
+    tracepoint(faceLog, packet_sent_error, local.str().c_str(), remote.str().c_str(), nBytesSent, 1);
+    return processErrorCode(error);
+  }
+
+  if (!m_isConnected) {
+    NFD_LOG_FACE_DEBUG(" NOT sent: " << nBytesSent << " bytes");
+    tracepoint(faceLog, packet_sent_error, local.str().c_str(), remote.str().c_str(), nBytesSent, 2);
+  }
+  else {
+    //NFD_LOG_FACE_DEBUG("Successfully sent: " << nBytesSent << " bytes");
+    tracepoint(faceLog, packet_sent, local.str().c_str(), remote.str().c_str(), nBytesSent);
+  }
 }
 
 template<class T, class U>

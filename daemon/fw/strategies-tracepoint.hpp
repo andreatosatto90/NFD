@@ -59,7 +59,8 @@ TRACEPOINT_EVENT(
     int, rtt,
     int, meanRtt,
     int, nRetries,
-    int, retrieveTime
+    int, retrieveTime,
+    int, boundedRtt
   ),
   TP_FIELDS(
     ctf_string(strategy_name, strategyName)
@@ -70,6 +71,7 @@ TRACEPOINT_EVENT(
     ctf_integer(int, mean_rtt, meanRtt)
     ctf_integer(int, num_retries, nRetries)
     ctf_integer(int, retrieve_time, retrieveTime)
+    ctf_integer(int, bounded_rtt, boundedRtt)
   )
 )
 
