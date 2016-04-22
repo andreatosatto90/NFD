@@ -352,13 +352,13 @@ DatagramTransport<T, U>::handleSend(const boost::system::error_code& error,
   remote << m_remoteEndpoint;
 
   if (error) {
-    NFD_LOG_FACE_DEBUG(" NOT sent: " << nBytesSent << " bytes");
+    NFD_LOG_FACE_DEBUG(" NOT sent - Error socket");
     tracepoint(faceLog, packet_sent_error, local.str().c_str(), remote.str().c_str(), nBytesSent, 1);
     return processErrorCode(error);
   }
 
   if (!m_isConnected) {
-    NFD_LOG_FACE_DEBUG(" NOT sent: " << nBytesSent << " bytes");
+    NFD_LOG_FACE_DEBUG(" NOT sent - Connection error ");
     tracepoint(faceLog, packet_sent_error, local.str().c_str(), remote.str().c_str(), nBytesSent, 2);
   }
   else {
@@ -381,7 +381,7 @@ DatagramTransport<T, U>::processErrorCode(const boost::system::error_code& error
     return;
 
   if (getPersistency() == ndn::nfd::FacePersistency::FACE_PERSISTENCY_PERMANENT) {
-    NFD_LOG_FACE_DEBUG("Permanent face ignores error: " << error.message());
+    //NFD_LOG_FACE_DEBUG("Permanent face ignores error: " << error.message());
     return;
   }
 

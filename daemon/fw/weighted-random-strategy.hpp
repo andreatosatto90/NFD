@@ -157,7 +157,6 @@ protected:
   float m_rttMax;
   float m_rttMin;
   float m_lastRtt;
-
   float m_rttMinCalc;
 
   uint32_t m_nSamples;

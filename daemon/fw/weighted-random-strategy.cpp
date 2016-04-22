@@ -202,12 +202,12 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
   //interestList->second.push_back(PendingInterest(lastFace->getInterfaceName(), lastFace, interest, fibEntry, pitEntry));
   //this->rejectPendingInterest(pitEntry);
 
-  if ( lastFace != nullptr) {
+  if (lastFace != nullptr) {
     auto interestList = m_interfaceInterests.insert({lastFace->getInterfaceName(), pendingInterests()}).first;
 
     auto pi = make_shared<PendingInterest>(PendingInterest(lastFace->getInterfaceName(), lastFace, fibEntry, pitEntry, time::steady_clock::now(), nullptr));
     pi->retryEvent = nullptr;
-    pi->deleteEvent = nullptr;
+    pi->deleteEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime()), bind(&WeightedRandomStrategy::removePendingInterest, this, pi, pitEntry)));
     interestList->second.push_back(pi);
 
     tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
@@ -417,7 +417,7 @@ WeightedRandomStrategy::removePendingInterest(shared_ptr<PendingInterest>& pi, s
                               }
                               if (pi->deleteEvent != nullptr) {
                                 m_scheduler.cancelEvent(*(pi->deleteEvent));
-                                pi->deleteEvent =nullptr;
+                                pi->deleteEvent = nullptr;
                               }
                               return true;
                           }
@@ -529,7 +529,7 @@ WeightedRandomStrategy::getSendTimeout()
     if (m_lastRtt == -1)
       m_rttMean = m_rtt0;
     else
-      m_rttMean = m_lastRtt;
+      m_rttMean = m_rtt0; // last rtt
   }
 
   float rtt = m_rttMean * m_rttMulti;
