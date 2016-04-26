@@ -104,7 +104,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
       shared_ptr<Face> outFace = nextHop.getFace();
       eligibleFaces.push_back(outFace);
       tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
-                 outFace->getId(), outFace->getTransport()->getInterfaceName().c_str(), -1);
+                 outFace->getId(), outFace->getTransport()->getInterfaceName().c_str(), -1, false);
     }
   }
 
@@ -116,7 +116,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
         shared_ptr<Face> outFace = nextHop.getFace();
         eligibleFaces.push_back(outFace);
         tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
-                   outFace->getId(), outFace->getInterfaceName().c_str(), -1);
+                   outFace->getId(), outFace->getInterfaceName().c_str(), -1, false);
       }
     }
   }

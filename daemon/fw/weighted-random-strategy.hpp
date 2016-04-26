@@ -31,6 +31,8 @@
 #include <ndn-cxx/util/scheduler.hpp>
 #include <ndn-cxx/util/network-interface.hpp>
 
+#include <daemon/face/transport.hpp>
+
 namespace nfd {
 namespace fw {
 
@@ -62,16 +64,14 @@ public:
   public:
     PendingInterest(const std::string& interfaceName, shared_ptr<Face> outFace,
                     shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry,
-                    time::steady_clock::TimePoint lastSent, shared_ptr<ndn::util::scheduler::EventId> retryEvent)
+                    shared_ptr<ndn::util::scheduler::EventId> retryEvent)
       : interfaceName(interfaceName)
       , outFace(outFace)
       , fibEntry(fibEntry)
       , pitEntry(pitEntry)
-      , retriesTimes()
       , retryEvent(retryEvent)
       , invalid(false)
       {
-        retriesTimes.push_back(lastSent);
       }
 
 
@@ -109,6 +109,11 @@ protected:
                               ndn::util::NetworkInterfaceState newState);
 
   void
+  handleFaceStateChanged(shared_ptr<ndn::util::NetworkInterface>& ni,
+                         face::FaceState oldState,
+                         face::FaceState newState);
+
+  void
   sendInvalidPendingInterest();
 
   void
@@ -123,6 +128,14 @@ protected:
 
   void
   deletePendingInterest(const shared_ptr<pit::Entry>& pitEntry);
+
+  shared_ptr<PendingInterest>
+  updatePendingInterest(const shared_ptr<pit::Entry>& pitEntry);
+
+  bool
+  insertPendingInterest(const Interest& interest, shared_ptr<Face> outFace,
+                        shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry,
+                        bool retryNow = true);
 
   void
   handleInterfaceAdded(const shared_ptr<ndn::util::NetworkInterface>& ni);
@@ -163,6 +176,8 @@ protected:
   std::vector<float> m_oldRtt;
   std::pair<float /*old*/, float /*new*/> rttMeanWeight;
   time::steady_clock::TimePoint lastRttTime;
+
+  shared_ptr<signal::Connection> resendAllEvent;
 
 };
 
