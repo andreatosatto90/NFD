@@ -160,7 +160,7 @@ WeightedRandomStrategy::insertPendingInterest(const Interest& interest,
     pi = make_shared<PendingInterest>(PendingInterest(outFace->getInterfaceName(), outFace, fibEntry, pitEntry, nullptr));
     interestList->second.push_back(pi);
     pi->deleteEvent = make_shared<ndn::util::scheduler::EventId>(
-                        m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime().count() + 200),
+                        m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime().count() + 100),
                                                   bind(&WeightedRandomStrategy::removePendingInterest, this, pi, pitEntry)));
     isNew = true;
   }

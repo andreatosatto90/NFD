@@ -26,12 +26,19 @@
 #ifndef NFD_DAEMON_FW_PREFERRED_WLAN_STRATEGY_HPP
 #define NFD_DAEMON_FW_PREFERRED_WLAN_STRATEGY_HPP
 
-#include "strategy.hpp"
+#include "retries-strategy.hpp"
+
+#include <ndn-cxx/util/scheduler.hpp>
+#include <ndn-cxx/util/network-interface.hpp>
+
+#include <daemon/face/transport.hpp>
+#include "rtt-estimator-retries.hpp"
+
 
 namespace nfd {
 namespace fw {
 
-class PreferredWlanStrategy : public Strategy
+class PreferredWlanStrategy : public RetriesStrategy
 {
 public:
   PreferredWlanStrategy(Forwarder& forwarder, const Name& name = STRATEGY_NAME);
@@ -45,9 +52,10 @@ public:
                        shared_ptr<fib::Entry> fibEntry,
                        shared_ptr<pit::Entry> pitEntry) DECL_OVERRIDE;
 
-  virtual void
-  beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
-                        const Face& inFace, const Data& data) DECL_OVERRIDE;
+  //virtual void
+  //beforeExpirePendingInterest(shared_ptr<pit::Entry> pitEntry) DECL_OVERRIDE;
+
+
 
 protected:
   class InterfaceInfo
@@ -63,7 +71,10 @@ protected:
 
   typedef std::unordered_map<std::string, InterfaceInfo> interfacesInfos;
 
-  int getFaceWeight(const shared_ptr<nfd::face::Face>& face) const;
+
+  int
+  getFaceWeight(const shared_ptr<nfd::face::Face>& face) const;
+
 
 public:
   static const Name STRATEGY_NAME;

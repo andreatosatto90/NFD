@@ -612,7 +612,7 @@ void
 Forwarder::setStragglerTimer(shared_ptr<pit::Entry> pitEntry, bool isSatisfied,
                              const time::milliseconds& dataFreshnessPeriod)
 {
-  time::nanoseconds stragglerTime = time::milliseconds(100);
+  time::nanoseconds stragglerTime = time::milliseconds(100); // TODO Andrea More time?
 
   scheduler::cancel(pitEntry->m_stragglerTimer);
   pitEntry->m_stragglerTimer = scheduler::schedule(stragglerTime,
