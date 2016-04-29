@@ -32,6 +32,8 @@
 
 #include <array>
 
+#include <ndn-cxx/util/scheduler.hpp>
+
 namespace nfd {
 
 namespace ip = boost::asio::ip;
@@ -112,6 +114,9 @@ protected:
   static EndpointId
   makeEndpointId(const typename protocol::endpoint& ep);
 
+  void
+  printStatistics();
+
 protected:
   typename protocol::socket m_socket;
   unique_ptr<typename protocol::socket> m_socket2;
@@ -126,6 +131,14 @@ private:
   typename protocol::endpoint m_localEndpoint;
   bool m_isConnected;
   bool m_inConnection;
+
+  // Stat
+  ndn::util::Scheduler m_scheduler;
+  int m_packetReceived;
+  int m_packetSent;
+  time::steady_clock::TimePoint m_lastPrintTime;
+  uint32_t m_statIntervalMs;
+
 };
 
 
@@ -133,12 +146,19 @@ template<class T, class U>
 DatagramTransport<T, U>::DatagramTransport(typename DatagramTransport::protocol::socket&& socket)
   : m_socket(std::move(socket))
   , m_hasBeenUsedRecently(false) // TODO add remote endpoint
+  , m_scheduler(getGlobalIoService())
 {
   m_socket.async_receive_from(boost::asio::buffer(m_receiveBuffer), m_sender,
                               bind(&DatagramTransport<T, U>::handleReceive, this,
                                    boost::asio::placeholders::error,
                                    boost::asio::placeholders::bytes_transferred));
 
+  m_statIntervalMs = 500;
+
+  m_packetSent = 0;
+  m_packetReceived = 0;
+  m_lastPrintTime = time::steady_clock::now();
+  m_scheduler.scheduleEvent(time::milliseconds(m_statIntervalMs), bind(&DatagramTransport::printStatistics, this));
   // TODO set class local and remote endpoint
 }
 
@@ -147,9 +167,16 @@ DatagramTransport<T, U>::DatagramTransport(typename protocol::endpoint remoteEnd
   : m_socket(getGlobalIoService(), remoteEndpoint.protocol())
   , m_hasBeenUsedRecently(false)
   , m_remoteEndpoint(remoteEndpoint)
+  , m_scheduler(getGlobalIoService())
 {
+  m_statIntervalMs = 500;
   m_isConnected = false;
   m_inConnection = false;
+
+  m_packetSent = 0;
+  m_packetReceived = 0;
+  m_lastPrintTime = time::steady_clock::now();
+  m_scheduler.scheduleEvent(time::milliseconds(m_statIntervalMs), bind(&DatagramTransport::printStatistics, this));
 }
 
 template<class T, class U>
@@ -242,7 +269,7 @@ DatagramTransport<T, U>::receiveDatagram(const uint8_t* buffer, size_t nBytesRec
   }
   m_hasBeenUsedRecently = true;
 
-
+  ++m_packetReceived;
   tracepoint(faceLog, packet_received, local.str().c_str(), remote.str().c_str(), nBytesReceived);
 
   Transport::Packet tp(std::move(element));
@@ -362,6 +389,7 @@ DatagramTransport<T, U>::handleSend(const boost::system::error_code& error,
     tracepoint(faceLog, packet_sent_error, local.str().c_str(), remote.str().c_str(), nBytesSent, 2);
   }
   else {
+    ++m_packetSent;
     //NFD_LOG_FACE_DEBUG("Successfully sent: " << nBytesSent << " bytes");
     tracepoint(faceLog, packet_sent, local.str().c_str(), remote.str().c_str(), nBytesSent);
   }
@@ -411,6 +439,28 @@ inline Transport::EndpointId
 DatagramTransport<T, U>::makeEndpointId(const typename protocol::endpoint& ep)
 {
   return 0;
+}
+
+template<class T, class U>
+inline void
+DatagramTransport<T, U>::printStatistics()
+{
+  time::milliseconds lastRunningTime =
+      time::duration_cast<time::milliseconds> (time::steady_clock::now() - m_lastPrintTime);
+
+  if (m_packetReceived > 0 || m_packetSent > 0) {
+    std::cerr << "S:   " << m_packetSent << "  \t"
+              << "R:   " << m_packetReceived << "  \t"
+              << "D:   " << m_packetSent - m_packetReceived << "  \t"
+              << "Speed:   " << static_cast<double>(m_packetReceived * 1304) / lastRunningTime.count() << " KB/s   \t"
+              << std::endl;
+  }
+
+  m_lastPrintTime = time::steady_clock::now();
+  m_packetReceived = 0;
+  m_packetSent = 0;
+
+  m_scheduler.scheduleEvent(time::milliseconds(m_statIntervalMs), bind(&DatagramTransport::printStatistics, this));
 }
 
 } // namespace face
