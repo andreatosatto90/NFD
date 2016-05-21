@@ -142,8 +142,8 @@ RttEstimatorRetries::computeRto()
 
   float rtt = m_rttMean * m_rttMulti;
 
-  if (rtt < 0) // TODO
-    return 1;
+  if (rtt < 5) // Just to avoid NFD packet flood, we need a better way to do it TODO delete when NFD can process more packets
+    return 5;
 
   return rtt;
 }

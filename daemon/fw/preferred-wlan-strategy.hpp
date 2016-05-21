@@ -67,14 +67,16 @@ protected:
   public:
     std::string name;
     int weight; // TODO uint
+    shared_ptr<ndn::util::NetworkInterface> ni;
   };
 
   typedef std::unordered_map<std::string, InterfaceInfo> interfacesInfos;
 
-
   int
   getFaceWeight(const shared_ptr<nfd::face::Face>& face) const;
 
+  virtual bool
+  isMainInterface(std::string interfaceName) DECL_OVERRIDE;
 
 public:
   static const Name STRATEGY_NAME;

@@ -212,10 +212,10 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
       this->sendInterest(pitEntry, outFace);
 
 
-      bool isNew = insertPendingInterest(interest, outFace, fibEntry, pitEntry, true);
+      insertPendingInterest(interest, outFace, fibEntry, pitEntry, true);
 
-      tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
-                 outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout(), isNew);
+      tracepoint(strategyLog, interest_sent, interest.toUri().c_str(),
+                 outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout());
       lastFace = outFace;
       return;
     }
@@ -228,10 +228,10 @@ WeightedRandomStrategy::afterReceiveInterest(const Face& inFace,
 
   if (lastFace != nullptr) {
 
-    bool isNew = insertPendingInterest(interest, lastFace, fibEntry, pitEntry, false);
+    insertPendingInterest(interest, lastFace, fibEntry, pitEntry, false);
 
-    tracepoint(strategyLog, interest_sent, m_name.toUri().c_str(), interest.toUri().c_str(),
-               lastFace->getId(), lastFace->getInterfaceName().c_str(), -2, isNew);
+    tracepoint(strategyLog, interest_sent, interest.toUri().c_str(),
+               lastFace->getId(), lastFace->getInterfaceName().c_str(), -2);
 
     return;
   }
@@ -416,7 +416,7 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
         this->sendInterest(pitEntry, outFace, true);
         pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
         pi->retriesTimes.push_back(time::steady_clock::now());
-        tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
+        tracepoint(strategyLog, interest_sent, pitEntry->getName().toUri().c_str(),
                    outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout());
 
       }
@@ -434,7 +434,7 @@ WeightedRandomStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_pt
       this->sendInterest(pitEntry, outFace, true);
       pi->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(getSendTimeout())), bind(&WeightedRandomStrategy::retryInterest, this, pitEntry, outFace, time::steady_clock::now(), pi, false)));
       pi->retriesTimes.push_back(time::steady_clock::now());
-      tracepoint(strategyLog, interest_sent_retry, m_name.toUri().c_str(), pitEntry->getName().toUri().c_str(),
+      tracepoint(strategyLog, interest_sent, pitEntry->getName().toUri().c_str(),
                  outFace->getId(), outFace->getInterfaceName().c_str(), getSendTimeout());
     }
   }

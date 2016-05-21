@@ -14,24 +14,20 @@ TRACEPOINT_EVENT(
   strategyLog,
   interest_sent,
   TP_ARGS(
-    const char*, strategyName,
     const char*, interest,
     int, faceId,
     const char*, interfaceName,
-    int, retryTimeout,
-    int, isNew
+    int, retryTimeout
   ),
   TP_FIELDS(
-    ctf_string(strategy_name, strategyName)
     ctf_string(interest_name, interest)
     ctf_integer(int, face_id, faceId)
     ctf_string(interface_name, interfaceName)
     ctf_integer(int, retry_timeout, retryTimeout)
-    ctf_integer(int, is_new, isNew)
   )
 )
 
-TRACEPOINT_EVENT(
+/*TRACEPOINT_EVENT(
   strategyLog,
   interest_sent_retry,
   TP_ARGS(
@@ -48,7 +44,7 @@ TRACEPOINT_EVENT(
     ctf_string(interface_name, interfaceName)
     ctf_integer(int, retry_timeout, retryTimeout)
   )
-)
+)*/
 
 TRACEPOINT_EVENT(
   strategyLog,

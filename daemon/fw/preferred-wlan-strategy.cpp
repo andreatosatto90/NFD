@@ -46,13 +46,12 @@ PreferredWlanStrategy::PreferredWlanStrategy(Forwarder& forwarder, const Name& n
   m_randomGen.seed(rd());
 
 
-  // Set weight 1 to preferred interface, 0 to the other
-  m_interfacesInfo.insert(std::make_pair("eth0",InterfaceInfo("eth0", 1)));
+  // Set weight 2 to preferred interface, 1 to the secondary, 0 to unused
+  m_interfacesInfo.insert(std::make_pair("eth0",InterfaceInfo("eth0", 2)));
   //m_interfacesInfo.insert(std::make_pair("enp2s0",InterfaceInfo("enp2s0", 0)));
   m_interfacesInfo.insert(std::make_pair("wwan0",InterfaceInfo("wwan0", 0)));
-  m_interfacesInfo.insert(std::make_pair("wlan0",InterfaceInfo("wlan0", 0)));
+  m_interfacesInfo.insert(std::make_pair("wlan0",InterfaceInfo("wlan0", 1)));
   m_interfacesInfo.insert(std::make_pair("wlp4s0",InterfaceInfo("wlp4s0", 0)));
-
 }
 
 PreferredWlanStrategy::~PreferredWlanStrategy()
@@ -65,14 +64,13 @@ PreferredWlanStrategy::~PreferredWlanStrategy()
  *  \param currentDownstream incoming FaceId of current Interest
  *  \param weight interface weight
  *  \param selWeight the interface needs the specified weight to be eligible
- *  \param now time::steady_clock::now(), ignored if !wantUnused
  */
 static inline bool
 predicate_NextHop_eligible(const shared_ptr<pit::Entry>& pitEntry,
-                           const fib::NextHop& nexthop, FaceId currentDownstream,
+                           const fib::NextHop& nexthop,
+                           FaceId currentDownstream,
                            int weight = 0,
-                           int selWeight = 0,
-                           time::steady_clock::TimePoint now = time::steady_clock::TimePoint::min())
+                           int selWeight = 0)
 {
   shared_ptr<Face> upstream = nexthop.getFace();
 
@@ -105,8 +103,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
 
   // get face with weight == 1
   for (const fib::NextHop& nextHop : nexthops) {
-    if (predicate_NextHop_eligible(pitEntry, nextHop, inFace.getId(), 1,
-                                   getFaceWeight(nextHop.getFace()), time::steady_clock::now())) {
+    if (predicate_NextHop_eligible(pitEntry, nextHop, inFace.getId(), 2, getFaceWeight(nextHop.getFace()))) {
       shared_ptr<Face> outFace = nextHop.getFace();
       int prob = getFaceWeight(outFace);
       if (prob > 0) {
@@ -121,8 +118,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
   // if no face with weight 1 are eligible get face with weight == 0
   if (eligibleFaces.size() == 0) {
     for (const fib::NextHop& nextHop : nexthops) {
-      if (predicate_NextHop_eligible(pitEntry, nextHop, inFace.getId(), 0,
-                                     getFaceWeight(nextHop.getFace()), time::steady_clock::now())) {
+      if (predicate_NextHop_eligible(pitEntry, nextHop, inFace.getId(), 1, getFaceWeight(nextHop.getFace()))) {
         shared_ptr<Face> outFace = nextHop.getFace();
         int prob = getFaceWeight(outFace);
         if (prob > 0) {
@@ -147,14 +143,13 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
     if (it != eligibleFaces.end()) {
       shared_ptr<Face> outFace = it->second;
       NFD_LOG_TRACE("Interest to face: " << outFace->getId());
-      this->sendInterest(pitEntry, outFace);
+      //this->sendInterest(pitEntry, outFace);
 
 
-      bool isNew = insertPendingInterest(interest, outFace, fibEntry, pitEntry, true);
+      insertPendingInterest(interest, outFace, fibEntry, pitEntry); // Also send the interest TODO change name
 
-      tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
-                 outFace->getId(), outFace->getInterfaceName().c_str(), rttEstimators[outFace->getInterfaceName()].computeRto(), isNew);
-      lastFace = outFace;
+      /*tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
+                 outFace->getId(), outFace->getInterfaceName().c_str(), rttEstimators[outFace->getInterfaceName()].computeRto());*/
       return;
     }
     else
@@ -163,26 +158,17 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
   else
     NFD_LOG_TRACE("No eligible faces 2");
 
-  NFD_LOG_TRACE("No eligible faces Interest rejected");
+  NFD_LOG_TRACE("No eligible faces, waiting to send");
 
-  if (lastFace != nullptr) {
+  insertPendingInterest(interest, nullptr, fibEntry, pitEntry);
 
-    bool isNew = insertPendingInterest(interest, lastFace, fibEntry, pitEntry, false);
 
-    tracepoint(strategyLog, interest_sent, STRATEGY_NAME.toUri().c_str(), interest.toUri().c_str(),
-               lastFace->getId(), lastFace->getInterfaceName().c_str(), -2, isNew);
-
-    return;
-  }
-
-  NFD_LOG_TRACE("Interest rejected");
+  /*NFD_LOG_TRACE("Interest rejected");
 
   lp::NackHeader nackHeader;
   nackHeader.setReason(lp::NackReason::DUPLICATE);
   this->sendNack(pitEntry, inFace, nackHeader);
-  this->rejectPendingInterest(pitEntry);
-
-
+  this->rejectPendingInterest(pitEntry);*/
   return;
 }
 
@@ -193,8 +179,19 @@ PreferredWlanStrategy::getFaceWeight(const shared_ptr<Face>& face) const
   auto it = m_interfacesInfo.find(nicName);
   if (it != m_interfacesInfo.end())
     return it->second.weight;
-  else
-    return 0;
+
+  return 0;
+}
+
+bool
+PreferredWlanStrategy::isMainInterface(std::string interfaceName)
+{
+  // return true if weight is 1
+  auto it = m_interfacesInfo.find(interfaceName);
+  if (it != m_interfacesInfo.end() && it->second.weight > 1)
+    return true;
+
+  return false;
 }
 
 } // namespace fw

@@ -61,12 +61,10 @@ public:
   public:
     PendingInterest(shared_ptr<fib::Entry> fibEntry,
                     shared_ptr<pit::Entry> pitEntry)
-      : fibEntry(fibEntry) // TODO delete
-      , pitEntry(pitEntry)
+      : pitEntry(pitEntry)
       {
       }
 
-    shared_ptr<fib::Entry> fibEntry;
     shared_ptr<pit::Entry> pitEntry;
     shared_ptr<ndn::util::scheduler::EventId> deleteEvent;
     std::vector<NextHopRetries> nextHops;
@@ -82,32 +80,44 @@ public:
   beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
                         const Face& inFace, const Data& data) DECL_OVERRIDE DECL_FINAL;
 
-  virtual void
-  beforeSatisfyPendingInterest(shared_ptr<PendingInterest> pendingInterest,
-                               const Face& inFace, const Data& data) {}
-
 protected:
 
-  bool
+  void
   insertPendingInterest(const Interest& interest, shared_ptr<Face> outFace,
-                        shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry,
-                        bool retryNow = true);
+                        shared_ptr<fib::Entry> fibEntry, shared_ptr<pit::Entry> pitEntry);
+
+  /**
+   * Return true if all the retries have to done with the specified interface.
+   * Use case: An interface state goes up and we need to know which interface has to do the retries
+   */
+  virtual bool
+  isMainInterface(std::string interfaceName); // TODO better name
 
 private:
 
   void
-  retryInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr<Face> outFace, weak_ptr<PendingInterest> pi);
+  retryInterest(shared_ptr<pit::Entry> pitEntry,
+                shared_ptr<Face> outFace,
+                weak_ptr<PendingInterest> pi);
 
   void
-  removePendingInterest(weak_ptr<PendingInterest> pi, shared_ptr<pit::Entry> pitEntry);
+  removePendingInterest(weak_ptr<PendingInterest> pi);
 
+  /**
+   * @brief updatePendingInterest
+   * @param pitEntry
+   * @return the updated pending interest, nullptr if no pending interest is found
+   */
   shared_ptr<PendingInterest>
-  updatePendingInterest(const shared_ptr<pit::Entry>& pitEntry);
+  updatePendingInterest(const shared_ptr<pit::Entry>& pitEntry, const ndn::Interest& interest);
 
   void
   handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterface>& ni,
                               ndn::util::NetworkInterfaceState oldState,
                               ndn::util::NetworkInterfaceState newState);
+
+  void
+  resendAllPendingInterest(std::string interfaceName);
 
   void
   handleFaceStateChanged(shared_ptr<ndn::util::NetworkInterface>& ni,
@@ -123,18 +133,13 @@ private:
 protected:
   ndn::util::Scheduler m_scheduler;
 
-protected:    //TODO Private
+private:
   const Name& m_name;
-  std::vector<shared_ptr<PendingInterest>> m_pendingInterests;
-  std::mt19937 m_randomGen;
-
-  shared_ptr<ndn::util::NetworkInterface> m_runningInterface;
-  shared_ptr<Face> lastFace;
-
-  shared_ptr<signal::Connection> resendAllEvent;
+  std::vector<shared_ptr<PendingInterest>> m_pendingInterests; // TODO use PIT measurements (what about zombie?)
 
   std::map<std::string /*IntefaceName*/, RttEstimatorRetries> rttEstimators;
 
+  time::milliseconds m_interestZombieTime; // TODO better name
 };
 
 } // namespace fw
