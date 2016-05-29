@@ -96,7 +96,7 @@ protected:
 private:
 
   void
-  retryInterest(shared_ptr<pit::Entry> pitEntry,
+  sendPendingInterest(shared_ptr<pit::Entry> pitEntry,
                 shared_ptr<Face> outFace,
                 weak_ptr<PendingInterest> pi);
 

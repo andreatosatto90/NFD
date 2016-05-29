@@ -32,8 +32,12 @@ RttEstimatorRetries::RttEstimatorRetries()
 {
   rttMeanWeight.first = 0.3;  // Old value
   rttMeanWeight.second = 0.7; // New value
+
+  rttVarWeight.first = 0.125;  // Old value
+  rttVarWeight.second = 0.875; // New value
+
   m_rttMean = -1;
-  m_lastRtt = -1;
+  m_lastRtt = -1; // currently unused
   m_rttMulti = 2;
   m_rttMin = 10;
   m_rttMax = 1000;
@@ -74,7 +78,7 @@ RttEstimatorRetries::addRttMeasurement(std::vector<time::steady_clock::TimePoint
     }
   }
   else
-    return -1; // This should not happen
+    return -1; // This should not happen (data received without a sent interest)
 
   float rttOriginal = rtt;
 
@@ -92,20 +96,21 @@ RttEstimatorRetries::addRttMeasurement(std::vector<time::steady_clock::TimePoint
     rtt = m_rttMax;
   }
 
-
-
   while (m_oldRtt.size() > m_nSamples) {
     m_oldRtt.erase(m_oldRtt.begin());
   }
   m_oldRtt.push_back(rtt);
 
   float newMean = m_oldRtt[0];
+  float newVar = m_oldRtt[0] / 2;
   for(uint32_t i = 1; i < m_oldRtt.size(); i++) {
+    newVar = (newVar * rttVarWeight.first) + (std::abs(m_oldRtt[i] - newMean) * rttVarWeight.second);
     newMean = (newMean * rttMeanWeight.first) + (m_oldRtt[i] * rttMeanWeight.second);
   }
 
   m_lastRtt = rtt;
   m_rttMean = newMean;
+  m_rttVar = newVar;
 
 
   /*if (m_rttMean == -1)
@@ -122,16 +127,17 @@ void
 RttEstimatorRetries::reset()
 {
   m_rttMean = -1;
+  m_rttVar = -1;
   m_rttMinCalc = -1;
+  m_oldRtt.clear();
 }
 
-float
+time::milliseconds
 RttEstimatorRetries::computeRto()
 {
   // DEBUG only
   //if (time::duration_cast<time::milliseconds>(time::steady_clock::now() - lastRttTime) > time::seconds(10))
     //m_rttMean = -1;
-
 
   if (m_rttMean == -1) {
     if (m_lastRtt == -1)
@@ -140,12 +146,13 @@ RttEstimatorRetries::computeRto()
       m_rttMean = m_rtt0; // last rtt
   }
 
-  float rtt = m_rttMean * m_rttMulti;
+  //int rtt = std::ceil(m_rttMean * m_rttMulti);
+  int rtt = std::ceil(m_rttMulti * (m_rttMean + (m_rttVar * 4)));
 
-  if (rtt < 5) // Just to avoid NFD packet flood, we need a better way to do it TODO delete when NFD can process more packets
-    return 5;
+  if (rtt < 5) // just to limit NFD packet flood, we need a better way to do it TODO delete when NFD can process more packets
+    rtt = 5;
 
-  return rtt;
+  return time::milliseconds(rtt);
 }
 
 

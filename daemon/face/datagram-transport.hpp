@@ -452,7 +452,7 @@ DatagramTransport<T, U>::printStatistics()
     std::cerr << "S:   " << m_packetSent << "  \t"
               << "R:   " << m_packetReceived << "  \t"
               << "D:   " << m_packetSent - m_packetReceived << "  \t"
-              << "Speed:   " << static_cast<double>(m_packetReceived * 1304) / lastRunningTime.count() << " KB/s   \t"
+              << "Speed:   " << static_cast<double>(m_packetReceived * 1407) / lastRunningTime.count() << " KB/s   \t"
               << std::endl;
   }
 

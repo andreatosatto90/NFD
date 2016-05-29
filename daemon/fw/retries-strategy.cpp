@@ -44,7 +44,6 @@ RetriesStrategy::RetriesStrategy(Forwarder& forwarder, const Name& name)
 {
   getGlobalNetworkMonitor().onInterfaceAdded.connect(bind(&RetriesStrategy::handleInterfaceAdded, this, _1));
   getGlobalNetworkMonitor().onInterfaceRemoved.connect(bind(&RetriesStrategy::handleInterfaceRemoved, this, _1));
-
 }
 
 RetriesStrategy::~RetriesStrategy()
@@ -90,10 +89,10 @@ RetriesStrategy::insertPendingInterest(const Interest& interest,
                         m_scheduler.scheduleEvent(time::milliseconds(interest.getInterestLifetime().count() + m_interestZombieTime.count()),
                                                   bind(&RetriesStrategy::removePendingInterest, this, pi)));
   }
-  // TODO here we assume that the fib don't change during the execution
+  // TODO we assume that the fib don't change during the execution, we should update next hops list
 
   if (outFace != nullptr)
-    retryInterest(pitEntry, outFace, pi);
+    sendPendingInterest(pitEntry, outFace, pi);
 }
 
 void
@@ -105,7 +104,6 @@ RetriesStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
 
     //NFD_LOG_INFO("Data received " << pitEntry->getName());
     bool hasOutRecords = false;
-    float rtt = -1;
     pit::OutRecordCollection::const_iterator outRecord = pitEntry->getOutRecord(inFace);
     // Calculate rtt only if the pitEntry has at least one out record
     if (outRecord != pitEntry->getOutRecords().end()) {
@@ -119,12 +117,13 @@ RetriesStrategy::beforeSatisfyInterest(shared_ptr<pit::Entry> pitEntry,
     }
     //else NFD_LOG_TRACE(pitEntry->getInterest() << " dataFrom " << inFace.getId() << " no-out-record");
 
-    int nRetries = 0; // just to trace
-    int retrieveTime = -1; // just to trace
+    // trace vars
+    float rtt = -1;
+    int nRetries = 0;
+    int retrieveTime = -1;
 
-    // TODO break cycle after first element found
     m_pendingInterests.erase(std::find_if(m_pendingInterests.begin(), m_pendingInterests.end(),
-                                          [&](shared_ptr<PendingInterest>& pi) {
+                                          [&](shared_ptr<PendingInterest>& pi) { // TODO unreadable, move out
                                               if(pi->pitEntry == pitEntry) { // || !pi->pitEntry->hasValidLocalInRecord()
                                                   for (auto& nextHop : pi->nextHops) {
 
@@ -191,10 +190,9 @@ RetriesStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterf
 
       if (m_pendingInterests.size() > 0 ) {
         for (shared_ptr<PendingInterest>& pi : m_pendingInterests) {
+          // TODO not working properly with more than 2 interfaces
           auto it = std::find_if(pi->nextHops.begin(), pi->nextHops.end(),
-                                  [ni] (const NextHopRetries& nextHop) {
-                                                   return ni->getName() != nextHop.outFace->getInterfaceName();
-                                                 }); // TODO not working with more than 2 interfaces
+                                  [ni] (const NextHopRetries& nextHop) { return ni->getName() != nextHop.outFace->getInterfaceName(); });
           if (it != pi->nextHops.end()) {
             if (it->retryEvent != nullptr)
               m_scheduler.cancelEvent(*(it->retryEvent));
@@ -210,9 +208,8 @@ RetriesStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterf
       for (shared_ptr<PendingInterest>& pi : m_pendingInterests) {
 
         auto it = std::find_if(pi->nextHops.begin(), pi->nextHops.end(),
-                                [ni] (const NextHopRetries& nextHop) {
-                                                 return ni->getName() == nextHop.outFace->getInterfaceName();
-                                               });
+                               [ni] (const NextHopRetries& nextHop) { return ni->getName() == nextHop.outFace->getInterfaceName();});
+
         if (it != pi->nextHops.end()) {
           if (it->retryEvent != nullptr)
             m_scheduler.cancelEvent(*(it->retryEvent));
@@ -220,12 +217,11 @@ RetriesStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterf
           it->retriesTimes.clear();
         }
 
-        // TODO not working with more than 2 interfaces
+        // TODO not working properly with more than 2 interfaces
         if (faceToSend == nullptr) {
           auto it2 = std::find_if(pi->nextHops.begin(), pi->nextHops.end(),
-                                  [ni] (const NextHopRetries& nextHop) {
-                                                     return ni->getName() != nextHop.outFace->getInterfaceName();
-                                                   });
+                                  [ni] (const NextHopRetries& nextHop) { return ni->getName() != nextHop.outFace->getInterfaceName();});
+
           if (it2 != pi->nextHops.end()) {
             faceToSend = it2->outFace;
           }
@@ -233,9 +229,8 @@ RetriesStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterf
       }
       rttEstimators[ni->getName()].reset();
 
-      if (faceToSend != nullptr && faceToSend->getState() == face::TransportState::UP) {
+      if (faceToSend != nullptr && faceToSend->getState() == face::TransportState::UP)
         resendAllPendingInterest(faceToSend->getInterfaceName());
-      }
     }
   }
 }
@@ -248,14 +243,13 @@ RetriesStrategy::resendAllPendingInterest(std::string interfaceName)
     for (auto& nextHop : pi->nextHops) {
       auto& outFace = nextHop.outFace;
       if (outFace->getId() != face::INVALID_FACEID && outFace->getInterfaceName() == interfaceName)
-        retryInterest(pi->pitEntry, nextHop.outFace, pi);
+        sendPendingInterest(pi->pitEntry, nextHop.outFace, pi);
       else {
         if (nextHop.retryEvent != nullptr) {
           m_scheduler.cancelEvent(*(nextHop.retryEvent));
           nextHop.retryEvent = nullptr;
         }
       }
-
     }
   }
 }
@@ -263,7 +257,7 @@ RetriesStrategy::resendAllPendingInterest(std::string interfaceName)
 void RetriesStrategy::handleFaceStateChanged(shared_ptr<ndn::util::NetworkInterface>& ni,
                                                     face::FaceState oldState, face::FaceState newState)
 {
- /* if (resendAllEvent != nullptr && newState == face::TransportState::UP) {
+  /*if (resendAllEvent != nullptr && newState == face::TransportState::UP) {
     NFD_LOG_DEBUG("Transport UP");
     NFD_LOG_DEBUG("Resend all after interface down");
     if (lastFace != nullptr && lastFace->getState() == face::TransportState::UP) {
@@ -286,25 +280,27 @@ void RetriesStrategy::handleFaceStateChanged(shared_ptr<ndn::util::NetworkInterf
 }
 
 void
-RetriesStrategy::retryInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr<Face> outFace,
-                               weak_ptr<PendingInterest> pi)
+RetriesStrategy::sendPendingInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr<Face> outFace, weak_ptr<PendingInterest> pi)
 {
   shared_ptr<PendingInterest> newPi = pi.lock();
   if (newPi) {
     if (newPi->pitEntry->hasValidLocalInRecord()) {
 
       auto it = std::find_if(newPi->nextHops.begin(), newPi->nextHops.end(),
-                                   [outFace] (const NextHopRetries& nextHop) { return outFace == nextHop.outFace;});
+                             [outFace] (const NextHopRetries& nextHop) { return outFace == nextHop.outFace;});
+
       if (it != newPi->nextHops.end()) {
         this->sendInterest(pitEntry, outFace, true);
         it->retriesTimes.push_back(time::steady_clock::now());
 
         if (it->retryEvent != nullptr)
            m_scheduler.cancelEvent(*(it->retryEvent));
-        it->retryEvent = make_shared<ndn::util::scheduler::EventId>(m_scheduler.scheduleEvent(time::milliseconds(int(rttEstimators[outFace->getInterfaceName()].computeRto())),
-                                                                    bind(&RetriesStrategy::retryInterest, this, pitEntry, outFace, newPi)));
+        it->retryEvent = make_shared<ndn::util::scheduler::EventId>(
+                           m_scheduler.scheduleEvent(rttEstimators[outFace->getInterfaceName()].computeRto(),
+                           bind(&RetriesStrategy::sendPendingInterest, this, pitEntry, outFace, newPi)));
+
         tracepoint(strategyLog, interest_sent, pitEntry->getName().toUri().c_str(),
-                   outFace->getId(), outFace->getInterfaceName().c_str(), rttEstimators[outFace->getInterfaceName()].computeRto());
+                   outFace->getId(), outFace->getInterfaceName().c_str(), rttEstimators[outFace->getInterfaceName()].computeRto().count());
       }
       else
         NFD_LOG_WARN("Pending interest has no face to the selected interface");
@@ -334,15 +330,11 @@ RetriesStrategy::removePendingInterest(weak_ptr<PendingInterest> pi)
 
     if (m_pendingInterests.size() > 0) {
       NFD_LOG_INFO(" Actual size " << m_pendingInterests.size());
-      //TODO exit after the first one is found
+
       m_pendingInterests.erase(std::find_if(m_pendingInterests.begin(), m_pendingInterests.end(),
-                                            [&](shared_ptr<PendingInterest>& piTmp) {
-                                              return piTmp->pitEntry == newPi->pitEntry ? true : false;
-                                            }));
+                                            [&](shared_ptr<PendingInterest>& piTmp) { return piTmp->pitEntry == newPi->pitEntry ? true : false;}));
     }
-
   }
-
 }
 
 void

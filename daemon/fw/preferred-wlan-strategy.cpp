@@ -186,9 +186,9 @@ PreferredWlanStrategy::getFaceWeight(const shared_ptr<Face>& face) const
 bool
 PreferredWlanStrategy::isMainInterface(std::string interfaceName)
 {
-  // return true if weight is 1
+  // return true if weight is 2
   auto it = m_interfacesInfo.find(interfaceName);
-  if (it != m_interfacesInfo.end() && it->second.weight > 1)
+  if (it != m_interfacesInfo.end() && it->second.weight == 2)
     return true;
 
   return false;

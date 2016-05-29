@@ -40,7 +40,7 @@ public:
   float
   addRttMeasurement(std::vector<time::steady_clock::TimePoint> retries);
 
-  float
+  time::milliseconds
   computeRto();
 
   void
@@ -59,6 +59,7 @@ public:
 private:
   // Rtt
   float m_rttMean;
+  float m_rttVar;
   float m_rtt0;
   float m_rttMulti;
   float m_rttMax;
@@ -69,6 +70,7 @@ private:
   uint32_t m_nSamples;
   std::vector<float> m_oldRtt;
   std::pair<float /*old*/, float /*new*/> rttMeanWeight;
+  std::pair<float /*old*/, float /*new*/> rttVarWeight;
   time::steady_clock::TimePoint lastRttTime;
 
 };
