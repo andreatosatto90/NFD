@@ -186,7 +186,7 @@ RetriesStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterf
     rttEstimators[ni->getName()].reset(); // TODO We need it also here?
 
     if (newState == ndn::util::NetworkInterfaceState::RUNNING) {
-      NFD_LOG_INFO("Interface UP, resend all");
+      NFD_LOG_DEBUG("Interface UP, resend all to " << ni->getName());
 
       if (m_pendingInterests.size() > 0 ) {
         for (shared_ptr<PendingInterest>& pi : m_pendingInterests) {
@@ -238,7 +238,7 @@ RetriesStrategy::handleInterfaceStateChanged(shared_ptr<ndn::util::NetworkInterf
 void
 RetriesStrategy::resendAllPendingInterest(std::string interfaceName)
 {
-  NFD_LOG_INFO("Resend size " << m_pendingInterests.size() << " to " << interfaceName);
+  NFD_LOG_DEBUG("Resend size " << m_pendingInterests.size() << " to " << interfaceName);
   for (shared_ptr<PendingInterest>& pi : m_pendingInterests) {
     for (auto& nextHop : pi->nextHops) {
       auto& outFace = nextHop.outFace;
@@ -301,6 +301,7 @@ RetriesStrategy::sendPendingInterest(shared_ptr<pit::Entry> pitEntry, shared_ptr
 
         tracepoint(strategyLog, interest_sent, pitEntry->getName().toUri().c_str(),
                    outFace->getId(), outFace->getInterfaceName().c_str(), rttEstimators[outFace->getInterfaceName()].computeRto().count());
+        NFD_LOG_DEBUG("Interest to interface "<< outFace->getInterfaceName());
       }
       else
         NFD_LOG_WARN("Pending interest has no face to the selected interface");
@@ -329,7 +330,7 @@ RetriesStrategy::removePendingInterest(weak_ptr<PendingInterest> pi)
     }
 
     if (m_pendingInterests.size() > 0) {
-      NFD_LOG_INFO(" Actual size " << m_pendingInterests.size());
+      NFD_LOG_TRACE("Removed interest, actual size " << m_pendingInterests.size());
 
       m_pendingInterests.erase(std::find_if(m_pendingInterests.begin(), m_pendingInterests.end(),
                                             [&](shared_ptr<PendingInterest>& piTmp) { return piTmp->pitEntry == newPi->pitEntry ? true : false;}));

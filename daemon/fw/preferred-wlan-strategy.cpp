@@ -142,7 +142,7 @@ PreferredWlanStrategy::afterReceiveInterest(const Face& inFace,
 
     if (it != eligibleFaces.end()) {
       shared_ptr<Face> outFace = it->second;
-      NFD_LOG_TRACE("Interest to face: " << outFace->getId());
+      NFD_LOG_DEBUG("Interest to interface: " << outFace->getInterfaceName());
       //this->sendInterest(pitEntry, outFace);
 
 

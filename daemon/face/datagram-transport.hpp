@@ -449,11 +449,12 @@ DatagramTransport<T, U>::printStatistics()
       time::duration_cast<time::milliseconds> (time::steady_clock::now() - m_lastPrintTime);
 
   if (m_packetReceived > 0 || m_packetSent > 0) {
-    std::cerr << "S:   " << m_packetSent << "  \t"
+    NFD_LOG_FACE_INFO( std::endl
+              << "Speed: " << static_cast<double>(m_packetReceived * 1407) / lastRunningTime.count() << " KB/s \t"
+              << "S:   " << m_packetSent << "  \t"
               << "R:   " << m_packetReceived << "  \t"
               << "D:   " << m_packetSent - m_packetReceived << "  \t"
-              << "Speed:   " << static_cast<double>(m_packetReceived * 1407) / lastRunningTime.count() << " KB/s   \t"
-              << std::endl;
+              );
   }
 
   m_lastPrintTime = time::steady_clock::now();
