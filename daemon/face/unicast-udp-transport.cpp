@@ -210,6 +210,15 @@ void UnicastUdpTransport::changeSocketLocalAddress()
           m_hasAddress = rebindSocket(udp::Endpoint(address, m_localEndpointPort));
 
       #ifdef __linux__
+          const char * name = m_networkInterface->getName().c_str();
+          if (::setsockopt(m_socket.native_handle(), SOL_SOCKET,
+                           SO_BINDTODEVICE, name, sizeof(name)) < 0) {
+            NFD_LOG_FACE_WARN("Failed to bind to device: "  << std::strerror(errno));
+          }
+          else
+            NFD_LOG_FACE_WARN("Binded to device ");
+
+
           //
           // By default, Linux does path MTU discovery on IPv4 sockets,
           // and sets the DF (Don't Fragment) flag on datagrams smaller
@@ -227,6 +236,8 @@ void UnicastUdpTransport::changeSocketLocalAddress()
                            IP_MTU_DISCOVER, &value, sizeof(value)) < 0) {
             NFD_LOG_FACE_WARN("Failed to disable path MTU discovery: " << std::strerror(errno));
           }
+
+
       #endif
 
           if (m_hasAddress)
